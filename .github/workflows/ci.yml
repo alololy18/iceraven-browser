@@ -55,19 +55,6 @@ jobs:
         run: |
           /usr/bin/ls -alh gradle/build/app/outputs/apk/forkRelease/
 
-      - name: Create signed APKs
-        uses: akliuxingyuan/sign-android-release@v2.0.1
-        with:
-          releaseDir: gradle/build/app/outputs/apk/forkRelease/
-          signingKey: ${{ secrets.DEBUG_SIGNING_KEY }}
-          keyAlias: ${{ secrets.DEBUG_ALIAS }}
-          keyStorePassword: ${{ secrets.DEBUG_KEY_STORE_PASSWORD }}
-          keyPassword: ${{ secrets.DEBUG_KEY_PASSWORD }}
-
-      - name: Debug
-        run: |
-          /usr/bin/ls -alh gradle/build/app/outputs/apk/forkRelease/
-
       - name: Upload arm64 apk
         uses: actions/upload-artifact@v7
         with:
