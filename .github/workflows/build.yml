@@ -1,0 +1,50 @@
+name: Build Feed Limiter APK
+
+on:
+  push:
+    branches: [ iceraven ]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          ref: iceraven
+          submodules: recursive
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      # Use the project's own CI scripts instead of a generic SDK action -
+      # these pin the exact platform/build-tools/NDK versions the build
+      # actually needs, which a generic setup-android step can't guarantee.
+      - name: Install Android SDK
+        run: ./automation/iceraven/install-sdk.sh
+
+      - name: Check available memory
+        run: free -h
+
+      - name: Patch android-components
+        run: ./automation/iceraven/patch_android_components.sh
+
+      - name: Set up Python venv
+        run: ./automation/iceraven/setup_venv.sh
+
+      - name: Configure debug signing
+        run: echo "autosignReleaseWithDebugKey=" >> local.properties
+
+      - name: Build APK
+        run: ./gradlew app:assembleForkRelease -PversionName="feed-limiter-0.1" --stacktrace --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: feed-limiter-apk
+          path: gradle/build/app/outputs/apk/forkRelease/*.apk
