@@ -105,3 +105,4 @@ test_artifacts/
 
 # Web extensions: manifest.json files are generated
 manifest.json
+!app/src/main/assets/extensions/feed-limiter/manifest.json
