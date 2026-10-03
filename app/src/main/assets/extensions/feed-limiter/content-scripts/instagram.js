@@ -50,6 +50,7 @@ function reportPostsAndRefreshBadge(count) {
 
 function start() {
   const root = document.querySelector("main") || document.body;
+  feedLimiterSetupVisibilityReporting(SITE);
   badge = feedLimiterCreateBadge();
   feedLimiterRefreshBadge(badge, SITE);
   // Timer-cap minutes tick in the background independent of scrolling,

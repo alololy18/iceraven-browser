@@ -1,14 +1,18 @@
-// Phase 1 adapter for X/Twitter - counts newly inserted tweet nodes via
-// MutationObserver and reports them to the background script.
+// Phase 1 adapter for LinkedIn - counts newly inserted feed post nodes
+// via MutationObserver and reports them to the background script.
 //
-// SELECTOR NOTE: article[data-testid="tweet"] has been a stable,
-// widely-documented selector for an individual tweet in the feed for a
-// long time, so this is more likely to hold up than the Instagram guess
-// - but it is still worth a quick live check (devtools, scroll a few
-// tweets) before trusting the counts, since X has changed data-testid
-// values before without notice.
-const SITE = "x.com";
-const POST_SELECTOR = 'article[data-testid="tweet"]';
+// SELECTOR CAVEAT: feed-shared-update-v2 is a long-standing class name
+// for an individual feed post that has shown up consistently in
+// LinkedIn's DOM for years, but it is a plain CSS class (not a stable
+// attribute or custom element like Reddit's), so it's the lowest-
+// confidence selector of the built-in adapters and the most likely to
+// silently break on a redesign. Has NOT been verified against the live
+// site. Before trusting the counts: open the page, open devtools, scroll
+// a few posts, and confirm this selector matches exactly one node per
+// post - not per comment, not per "People you may know" sidebar card, not
+// matching zero because the markup changed.
+const SITE = "linkedin.com";
+const POST_SELECTOR = "div.feed-shared-update-v2";
 
 const seenPosts = new WeakSet();
 
@@ -48,7 +52,7 @@ function reportPostsAndRefreshBadge(count) {
 }
 
 function start() {
-  const root = document.querySelector('[data-testid="primaryColumn"]') || document.body;
+  const root = document.querySelector("main") || document.body;
   feedLimiterSetupVisibilityReporting(SITE);
   badge = feedLimiterCreateBadge();
   feedLimiterRefreshBadge(badge, SITE);

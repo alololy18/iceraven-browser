@@ -1,14 +1,17 @@
-// Phase 1 adapter for X/Twitter - counts newly inserted tweet nodes via
+// Phase 1 adapter for Reddit - counts newly inserted feed post nodes via
 // MutationObserver and reports them to the background script.
 //
-// SELECTOR NOTE: article[data-testid="tweet"] has been a stable,
-// widely-documented selector for an individual tweet in the feed for a
-// long time, so this is more likely to hold up than the Instagram guess
-// - but it is still worth a quick live check (devtools, scroll a few
-// tweets) before trusting the counts, since X has changed data-testid
-// values before without notice.
-const SITE = "x.com";
-const POST_SELECTOR = 'article[data-testid="tweet"]';
+// SELECTOR NOTE: the current (2026) Reddit web client renders each feed
+// post as a <shreddit-post> custom element (a Web Component tag, not a
+// class), which is a more stable kind of hook than a CSS class since it's
+// part of the site's actual component architecture rather than
+// deploy-generated styling - confirmed via public documentation as of
+// this writing, though not independently re-verified against the live
+// site today. This adapter only covers the new (shreddit) front end, not
+// old.reddit.com, which uses a completely different DOM structure - if
+// you use old.reddit.com day to day, this won't count anything there.
+const SITE = "reddit.com";
+const POST_SELECTOR = "shreddit-post";
 
 const seenPosts = new WeakSet();
 
@@ -48,7 +51,7 @@ function reportPostsAndRefreshBadge(count) {
 }
 
 function start() {
-  const root = document.querySelector('[data-testid="primaryColumn"]') || document.body;
+  const root = document.body;
   feedLimiterSetupVisibilityReporting(SITE);
   badge = feedLimiterCreateBadge();
   feedLimiterRefreshBadge(badge, SITE);

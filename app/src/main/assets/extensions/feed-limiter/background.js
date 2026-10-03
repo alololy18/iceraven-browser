@@ -16,6 +16,21 @@ let windowFocused = true;
 // and hydrated from storage once at startup (see hydrateBlockedCache).
 const blockedSitesCache = new Set();
 
+// Per-tab visibility reports (document.visibilitychange, reported by
+// each adapter via feedLimiterSetupVisibilityReporting in badge.js).
+// windows.onFocusChanged's behavior in GeckoView's single-window Android
+// model isn't well documented, and Android's own process-priority model
+// can leave a "focused" window state stale when the whole app is
+// backgrounded - e.g. home button, app switcher, screen lock. Firefox for
+// Android is confirmed to fire visibilitychange reliably on exactly those
+// transitions (unlike most mobile browsers), so it's the primary signal in
+// currentForegroundSite() below; windowFocused is kept only as a fallback
+// for the brief window before a tab's first visibility report arrives.
+// Keyed by tabId, not globally, so the same site open in a second,
+// background tab never counts time just because the foreground tab
+// happens to match too.
+const tabVisibility = new Map();
+
 async function getCounts() {
   const { counts } = await browser.storage.local.get("counts");
   return counts || {};
@@ -83,8 +98,8 @@ async function redirectSiteTabsToInterstitial(site) {
   for (const tab of tabs) {
     if (!tab.url) continue;
     try {
-      const hostname = new URL(tab.url).hostname;
-      if (matchSite(hostname) === site) {
+      const url = new URL(tab.url);
+      if (matchSite(url.hostname, url.pathname) === site) {
         browser.tabs.update(tab.id, { url: INTERSTITIAL_URL });
       }
     } catch (e) {
@@ -115,32 +130,46 @@ browser.runtime.onMessage.addListener(async (msg, sender) => {
     const entry = await getEntry(site);
     return { entry, cfg };
   }
+
+  // Per-tab visibility reports (document.visibilitychange) from each
+  // adapter - see tabVisibility below for why this exists.
+  if (msg?.type === "feed-limiter:visibility") {
+    if (sender.tab) tabVisibility.set(sender.tab.id, !!msg.visible);
+    return;
+  }
 });
+
+// Removes a tab's stale visibility entry once it's gone, so a closed
+// tab's last-known state can never be mistaken for a live one.
+browser.tabs.onRemoved.addListener((tabId) => tabVisibility.delete(tabId));
 
 // --- hard block on return: catches reloads, new tabs, deep links ---
 browser.webNavigation.onBeforeNavigate.addListener(async (details) => {
   if (details.frameId !== 0) return; // top-level frame only
-  let hostname;
+  let url;
   try {
-    hostname = new URL(details.url).hostname;
+    url = new URL(details.url);
   } catch (e) {
     return;
   }
-  const site = matchSite(hostname);
+  const site = matchSite(url.hostname, url.pathname);
   if (!site) return;
   if (await isBlocked(site)) {
     browser.tabs.update(details.tabId, { url: INTERSTITIAL_URL });
   }
 });
 
-// --- timer tracking: is a configured site the active, focused tab? ---
+// --- timer tracking: is a configured site genuinely on-screen right now? ---
 async function currentForegroundSite() {
-  if (!windowFocused) return null;
   const tabsFound = await browser.tabs.query({ active: true, currentWindow: true });
   const activeTab = tabsFound[0];
   if (!activeTab || !activeTab.url) return null;
+  const reportedVisible = tabVisibility.get(activeTab.id);
+  const visible = reportedVisible !== undefined ? reportedVisible : windowFocused;
+  if (!visible) return null;
   try {
-    return matchSite(new URL(activeTab.url).hostname);
+    const url = new URL(activeTab.url);
+    return matchSite(url.hostname, url.pathname);
   } catch (e) {
     return null;
   }
@@ -164,31 +193,41 @@ browser.alarms.onAlarm.addListener(async (alarm) => {
 });
 
 // --- best-effort network-level cutoff (belt-and-braces for post cap) ---
-// CAVEAT - NOT YET VERIFIED AGAINST LIVE TRAFFIC: these URL patterns are
-// a starting guess at each site's pagination/"load more" endpoint, based
-// on publicly known API shapes as of my training data - not confirmed
-// against what Instagram/X actually call today. Both sites change their
-// API paths without notice. Before relying on this layer, open devtools
-// Network tab (filtered to Fetch/XHR), scroll the real feed, and update
-// the patterns below to match what you actually see. Until then, treat
-// the content-script DOM cutoff as the real enforcement and this as a
-// secondary layer that may currently be a no-op.
+// CAVEAT - NOT YET VERIFIED AGAINST LIVE TRAFFIC for any site below,
+// Instagram/X included: these are starting guesses at each site's
+// pagination/"load more" endpoint based on publicly documented API shapes,
+// not confirmed against what each site actually calls today. All of these
+// sites change their API paths without notice. Before relying on this
+// layer for a given site, open devtools Network tab (filtered to
+// Fetch/XHR), scroll the real feed, and update that site's pattern(s) to
+// match what you actually see. Until then, treat the content-script DOM
+// cutoff as the real enforcement and this whole layer as a secondary one
+// that may currently be a no-op for some or all sites - TikTok and
+// LinkedIn in particular are guesses with lower confidence than the rest,
+// since their pagination calls are less consistently documented
+// publicly. YouTube Shorts has no pattern at all for the same reason
+// (Shorts prefetches via an internal batch endpoint that isn't stable
+// enough to guess) - its post cap relies on the DOM cutoff alone.
 const PAGINATION_URL_PATTERNS = [
   "*://*.instagram.com/graphql/query*",
   "*://*.instagram.com/api/v1/feed/timeline/*",
   "*://x.com/i/api/graphql/*",
-  "*://twitter.com/i/api/graphql/*"
+  "*://twitter.com/i/api/graphql/*",
+  "*://*.tiktok.com/api/recommend/item_list/*",
+  "*://*.facebook.com/api/graphql/*",
+  "*://*.reddit.com/svc/shreddit/*",
+  "*://*.linkedin.com/voyager/api/graphql*"
 ];
 
 browser.webRequest.onBeforeRequest.addListener(
   (details) => {
-    let hostname;
+    let url;
     try {
-      hostname = new URL(details.url).hostname;
+      url = new URL(details.url);
     } catch (e) {
       return {};
     }
-    const site = matchSite(hostname);
+    const site = matchSite(url.hostname, url.pathname);
     if (!site) return {};
     const cfg = FEED_LIMITER_CONFIG.sites[site];
     if (!cfg || cfg.postLimit == null) return {};

@@ -20,6 +20,41 @@ const FEED_LIMITER_CONFIG = {
       mode: "post",
       postLimit: 20,
       timerMinutesLimit: null
+    },
+    "tiktok.com": {
+      type: "built-in",
+      mode: "both",
+      postLimit: 40, // videos are short, so a higher count than IG/X is deliberate
+      timerMinutesLimit: 30
+    },
+    "facebook.com": {
+      type: "built-in",
+      mode: "both",
+      postLimit: 25,
+      timerMinutesLimit: 45
+    },
+    "reddit.com": {
+      type: "built-in",
+      mode: "both",
+      postLimit: 25,
+      timerMinutesLimit: 45
+    },
+    "linkedin.com": {
+      type: "built-in",
+      mode: "post",
+      postLimit: 20,
+      timerMinutesLimit: null
+    },
+    // Key is path-scoped, not just the hostname - matchSite() below
+    // special-cases youtube.com so only /shorts/ paths resolve to this
+    // entry. Regular YouTube watch pages are intentionally untouched
+    // until Phase 3 (per the build plan, they get different, timer-only
+    // "custom-style" treatment, not folded into the Shorts post-counter).
+    "youtube.com/shorts": {
+      type: "built-in",
+      mode: "both",
+      postLimit: 40,
+      timerMinutesLimit: 30
     }
   }
 };
@@ -55,10 +90,23 @@ function todayKey() {
 
 // Maps a hostname (e.g. "www.instagram.com", "mobile.x.com") back to its
 // config key ("instagram.com", "x.com"). Treats twitter.com as an alias
-// of the x.com config entry.
-function matchSite(hostname) {
+// of the x.com config entry. youtube.com is special-cased and path-aware:
+// only /shorts/ paths resolve to the "youtube.com/shorts" config entry -
+// regular watch pages return null (out of scope until Phase 3), so they
+// never get hard-blocked or network-capped just because the Shorts
+// counter tripped. Callers that have a pathname available (anything
+// working from a full URL) should pass it; callers that only have a
+// hostname (none currently) will simply never match YouTube, which is
+// the safe default.
+function matchSite(hostname, pathname) {
   if (!hostname) return null;
   const aliases = { "twitter.com": "x.com" };
+
+  if (hostname === "youtube.com" || hostname.endsWith(".youtube.com")) {
+    if (pathname && pathname.startsWith("/shorts/")) return "youtube.com/shorts";
+    return null;
+  }
+
   for (const site of Object.keys(FEED_LIMITER_CONFIG.sites)) {
     if (hostname === site || hostname.endsWith("." + site)) return site;
   }

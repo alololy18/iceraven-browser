@@ -1,14 +1,16 @@
-// Phase 1 adapter for X/Twitter - counts newly inserted tweet nodes via
-// MutationObserver and reports them to the background script.
+// Phase 1 adapter for TikTok - counts newly inserted For You feed video
+// nodes via MutationObserver and reports them to the background script.
 //
-// SELECTOR NOTE: article[data-testid="tweet"] has been a stable,
-// widely-documented selector for an individual tweet in the feed for a
-// long time, so this is more likely to hold up than the Instagram guess
-// - but it is still worth a quick live check (devtools, scroll a few
-// tweets) before trusting the counts, since X has changed data-testid
-// values before without notice.
-const SITE = "x.com";
-const POST_SELECTOR = 'article[data-testid="tweet"]';
+// SELECTOR CAVEAT: TikTok's web client uses data-e2e attributes for
+// testing hooks, which tend to be more stable than class names, but this
+// has NOT been verified against the live site (lower confidence than the
+// X adapter, similar confidence to the Instagram one). Before trusting
+// the counts: open the page, open devtools, scroll a few videos, and
+// confirm this selector matches exactly one node per video in the feed -
+// not per comment, not per sidebar recommendation, not matching zero
+// because the markup changed.
+const SITE = "tiktok.com";
+const POST_SELECTOR = 'div[data-e2e="recommend-list-item-container"]';
 
 const seenPosts = new WeakSet();
 
@@ -48,7 +50,7 @@ function reportPostsAndRefreshBadge(count) {
 }
 
 function start() {
-  const root = document.querySelector('[data-testid="primaryColumn"]') || document.body;
+  const root = document.body;
   feedLimiterSetupVisibilityReporting(SITE);
   badge = feedLimiterCreateBadge();
   feedLimiterRefreshBadge(badge, SITE);

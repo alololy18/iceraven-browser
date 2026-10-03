@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
   "name": "Feed Limiter (Phase 1 dev build)",
-  "version": "0.1.0",
-  "description": "Core post-cap/timer-cap counting and blocking logic for Instagram and X. Phase 1: sideload-only, no native settings UI, no friction/cooldown gate yet, no custom sites or YouTube.",
+  "version": "0.2.0",
+  "description": "Core post-cap/timer-cap counting and blocking logic for Instagram, X, TikTok, Facebook, Reddit, LinkedIn, and YouTube Shorts. Phase 1: sideload-only/built-in, no native settings UI or friction/cooldown gate yet (Phase 2), no custom sites or regular YouTube (Phase 3).",
   "permissions": [
     "storage",
     "tabs",
@@ -12,7 +12,12 @@
     "alarms",
     "*://*.instagram.com/*",
     "*://*.x.com/*",
-    "*://*.twitter.com/*"
+    "*://*.twitter.com/*",
+    "*://*.tiktok.com/*",
+    "*://*.facebook.com/*",
+    "*://*.reddit.com/*",
+    "*://*.linkedin.com/*",
+    "*://*.youtube.com/*"
   ],
   "background": {
     "scripts": ["config.js", "background.js"]
@@ -27,6 +32,36 @@
     {
       "matches": ["*://*.x.com/*", "*://*.twitter.com/*"],
       "js": ["content-scripts/badge.js", "content-scripts/x.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": ["*://*.tiktok.com/*"],
+      "js": ["content-scripts/badge.js", "content-scripts/tiktok.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": ["*://*.facebook.com/*"],
+      "js": ["content-scripts/badge.js", "content-scripts/facebook.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": ["*://*.reddit.com/*"],
+      "js": ["content-scripts/badge.js", "content-scripts/reddit.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": ["*://*.linkedin.com/*"],
+      "js": ["content-scripts/badge.js", "content-scripts/linkedin.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": ["*://*.youtube.com/shorts/*"],
+      "js": ["content-scripts/badge.js", "content-scripts/youtube-shorts.js"],
       "run_at": "document_idle",
       "all_frames": false
     }

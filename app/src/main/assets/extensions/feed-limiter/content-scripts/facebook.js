@@ -1,14 +1,19 @@
-// Phase 1 adapter for X/Twitter - counts newly inserted tweet nodes via
-// MutationObserver and reports them to the background script.
+// Phase 1 adapter for Facebook - counts newly inserted feed post nodes
+// via MutationObserver and reports them to the background script.
 //
-// SELECTOR NOTE: article[data-testid="tweet"] has been a stable,
-// widely-documented selector for an individual tweet in the feed for a
-// long time, so this is more likely to hold up than the Instagram guess
-// - but it is still worth a quick live check (devtools, scroll a few
-// tweets) before trusting the counts, since X has changed data-testid
-// values before without notice.
-const SITE = "x.com";
-const POST_SELECTOR = 'article[data-testid="tweet"]';
+// SELECTOR CAVEAT: Facebook's feed markup uses heavily randomized/
+// obfuscated class names that change on every deploy, so counting by
+// class is a non-starter. div[role="article"] is a longer-standing,
+// accessibility-driven attribute Facebook uses to mark each feed post for
+// screen readers, which tends to survive redesigns better than classes -
+// but this has NOT been verified against the live site, and is a lower
+// confidence selector than the X adapter's. Before trusting the counts:
+// open the page, open devtools, scroll a few posts, and confirm this
+// selector matches exactly one node per post - not per comment, not per
+// "suggested for you" sidebar card, not matching zero because the markup
+// changed.
+const SITE = "facebook.com";
+const POST_SELECTOR = 'div[role="article"]';
 
 const seenPosts = new WeakSet();
 
@@ -48,7 +53,7 @@ function reportPostsAndRefreshBadge(count) {
 }
 
 function start() {
-  const root = document.querySelector('[data-testid="primaryColumn"]') || document.body;
+  const root = document.querySelector('div[role="main"]') || document.body;
   feedLimiterSetupVisibilityReporting(SITE);
   badge = feedLimiterCreateBadge();
   feedLimiterRefreshBadge(badge, SITE);

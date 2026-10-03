@@ -26,6 +26,25 @@ function feedLimiterCreateBadge() {
   return badge;
 }
 
+// Reports document.visibilitychange to the background script so the
+// timer cap only accrues minutes while this tab is genuinely on-screen -
+// not just the active tab in an app that's actually sitting in the
+// background (home button, app switcher, screen lock). See the long
+// comment above tabVisibility in background.js for why this signal is
+// trusted over browser.windows.onFocusChanged on Android. Called once
+// from each adapter's start().
+function feedLimiterSetupVisibilityReporting(site) {
+  function report() {
+    browser.runtime.sendMessage({
+      type: "feed-limiter:visibility",
+      site,
+      visible: document.visibilityState === "visible"
+    });
+  }
+  document.addEventListener("visibilitychange", report);
+  report();
+}
+
 async function feedLimiterRefreshBadge(badge, site) {
   let status;
   try {
