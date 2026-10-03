@@ -55,6 +55,36 @@ jobs:
         run: |
           /usr/bin/ls -alh gradle/build/app/outputs/apk/forkRelease/
 
+      - name: Sign APKs with debug key
+        run: |
+          set -e
+          SDK_ROOT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          BUILD_TOOLS=$(ls -d "$SDK_ROOT"/build-tools/*/ | sort -V | tail -n1)
+          ZIPALIGN="${BUILD_TOOLS}zipalign"
+          APKSIGNER="${BUILD_TOOLS}apksigner"
+
+          keytool -genkeypair -v \
+            -keystore "$GITHUB_WORKSPACE/debug.keystore" \
+            -storepass android -keypass android \
+            -alias androiddebugkey \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+          cd gradle/build/app/outputs/apk/forkRelease
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            "$ZIPALIGN" -p -f 4 \
+              "app-${abi}-forkRelease-unsigned.apk" \
+              "app-${abi}-forkRelease-aligned.apk"
+            "$APKSIGNER" sign \
+              --ks "$GITHUB_WORKSPACE/debug.keystore" \
+              --ks-pass pass:android \
+              --ks-key-alias androiddebugkey \
+              --key-pass pass:android \
+              --out "app-${abi}-forkRelease.apk" \
+              "app-${abi}-forkRelease-aligned.apk"
+          done
+          ls -alh
+
       - name: Upload arm64 apk
         uses: actions/upload-artifact@v7
         with:
