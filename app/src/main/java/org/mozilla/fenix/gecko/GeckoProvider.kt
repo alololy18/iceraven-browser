@@ -95,6 +95,31 @@ object GeckoProvider {
                 }
             )
 
+        // Feed Limiter (personal build): install the bundled WebExtension as a
+        // built-in extension so no sideloading is needed on-device. Idempotent -
+        // safe to call every time this runtime is created, and createRuntime()
+        // itself only ever runs once per process thanks to getOrCreateRuntime().
+        geckoRuntime.webExtensionController
+            .ensureBuiltIn(
+                "resource://android/assets/extensions/feed-limiter/",
+                "feed-limiter-dev@personal.local",
+            )
+            .accept(
+                { extension ->
+                    android.util.Log.i(
+                        "FeedLimiter",
+                        "Built-in extension ready: ${extension?.id}",
+                    )
+                },
+                { throwable ->
+                    android.util.Log.e(
+                        "FeedLimiter",
+                        "Failed to install built-in extension",
+                        throwable,
+                    )
+                },
+            )
+
         return geckoRuntime
     }
 
