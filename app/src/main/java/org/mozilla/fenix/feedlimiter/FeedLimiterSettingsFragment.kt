@@ -12,6 +12,8 @@ import androidx.fragment.app.viewModels
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import org.mozilla.fenix.R
+
 // IMPORTANT: add `import <your app's base package>.R` here once this file
 // moves into your fork - e.g. `import org.mozilla.fenix.R`. Because this
 // file lives in the org.mozilla.fenix.feedlimiter SUB-package, Kotlin will

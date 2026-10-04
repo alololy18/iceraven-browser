@@ -20,6 +20,7 @@ import androidx.fragment.app.viewModels
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.navigation.fragment.navArgs
+import org.mozilla.fenix.R
 
 /**
  * Generic friction/cooldown confirm screen, reused for all three
