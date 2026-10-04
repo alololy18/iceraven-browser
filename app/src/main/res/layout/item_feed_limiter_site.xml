@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  PLACEHOLDER RESOURCE IDS/DIMENS - uses plain hardcoded padding/text sizes
+  rather than this fork's actual dimens/styles resources (unknown from
+  here), so it will look slightly generic next to the stock Settings
+  screens rather than fully matching their spacing/typography. Functional
+  first, polish later - see feature list item 34 territory for a visual
+  pass once this works end to end.
+
+  CAVEAT: androidx.appcompat.widget.SwitchCompat is used instead of the
+  platform Switch for consistency with older API levels, matching what
+  FeedLimiterSiteAdapter.kt's findViewById casts expect. If your fork's
+  min SDK is high enough that it uses com.google.android.material.switchmaterial.SwitchMaterial
+  elsewhere instead, swap both the tag below and the Kotlin import/cast to
+  match, or this will crash with a ClassCastException at bind time.
+-->
+<androidx.cardview.widget.CardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginHorizontal="12dp"
+    android:layout_marginVertical="6dp"
+    app:cardCornerRadius="8dp"
+    app:cardElevation="2dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <!-- Site name + overall enable/disable -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/tvSiteName"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                tools:text="Instagram" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/switchEnabled"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <!-- Live usage readout -->
+        <TextView
+            android:id="@+id/tvUsage"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textSize="13sp"
+            android:alpha="0.7"
+            tools:text="12 of 30 posts · 20 of 45 min" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginVertical="12dp"
+            android:background="#1F000000" />
+
+        <!-- Post cap row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Post cap" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/switchPostCap"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="12dp" />
+
+            <Button
+                android:id="@+id/btnPostMinus"
+                style="?android:attr/buttonStyleSmall"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="–"
+                android:minWidth="0dp" />
+
+            <TextView
+                android:id="@+id/tvPostLimit"
+                android:layout_width="40dp"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:textStyle="bold"
+                tools:text="30" />
+
+            <Button
+                android:id="@+id/btnPostPlus"
+                style="?android:attr/buttonStyleSmall"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="+"
+                android:minWidth="0dp" />
+        </LinearLayout>
+
+        <!-- Timer cap row -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Timer cap (min)" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/switchTimerCap"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="12dp" />
+
+            <Button
+                android:id="@+id/btnTimerMinus"
+                style="?android:attr/buttonStyleSmall"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="–"
+                android:minWidth="0dp" />
+
+            <TextView
+                android:id="@+id/tvTimerLimit"
+                android:layout_width="40dp"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:textStyle="bold"
+                tools:text="45" />
+
+            <Button
+                android:id="@+id/btnTimerPlus"
+                style="?android:attr/buttonStyleSmall"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="+"
+                android:minWidth="0dp" />
+        </LinearLayout>
+    </LinearLayout>
+</androidx.cardview.widget.CardView>

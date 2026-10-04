@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  PLACEHOLDER - plain RecyclerView in a vertical LinearLayout with a title
+  bar; not matched to this fork's actual Settings-screen chrome/toolbar
+  styling (unknown from here - the real Settings screen likely already
+  supplies its own ActionBar/toolbar via the hosting Activity/nav graph, in
+  which case the inner title TextView below is probably redundant and can
+  be deleted once this is wired into the real nav graph).
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="16dp"
+        android:text="Feed Limiter"
+        android:textSize="20sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="16dp"
+        android:paddingBottom="8dp"
+        android:text="Built-in sites. Custom sites and YouTube come in a later update."
+        android:textSize="13sp"
+        android:alpha="0.7" />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recyclerFeedLimiterSites"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:paddingBottom="16dp" />
+
+</LinearLayout>
