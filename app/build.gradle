@@ -644,6 +644,9 @@ dependencies {
     implementation libs.androidx.documentfile
     implementation libs.zxing
 
+    implementation libs.androidx.cardview
+    implementation libs.androidx.fragment.ktx
+
     implementation libs.androidx.room.runtime
     ksp libs.androidx.room.compiler
 
