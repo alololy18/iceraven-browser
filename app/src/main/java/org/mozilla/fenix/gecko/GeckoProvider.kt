@@ -21,6 +21,8 @@ import mozilla.components.service.sync.logins.GeckoLoginStorageDelegate
 import org.mozilla.fenix.Config
 import org.mozilla.fenix.components.appstate.AppAction
 import org.mozilla.fenix.ext.components
+import org.mozilla.fenix.feedlimiter.FeedLimiterBridgeHolder
+import org.mozilla.fenix.feedlimiter.FeedLimiterExtensionBridge
 import org.mozilla.fenix.nimbus.FxNimbus
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoRuntimeSettings
@@ -110,6 +112,15 @@ object GeckoProvider {
                         "FeedLimiter",
                         "Built-in extension ready: ${extension?.id}",
                     )
+                    if (extension != null) {
+                        // Creates the native-side bridge singleton and wires it as the
+                        // message delegate for this extension's native-messaging port.
+                        // "feedlimiter" MUST exactly match the nativeApp string
+                        // background.js passes to browser.runtime.connectNative(...).
+                        val feedLimiterBridge = FeedLimiterExtensionBridge(context)
+                        FeedLimiterBridgeHolder.initialize(feedLimiterBridge)
+                        extension.setMessageDelegate(feedLimiterBridge, "feedlimiter")
+                    }
                 },
                 { throwable ->
                     android.util.Log.e(
@@ -171,3 +182,4 @@ object GeckoProvider {
         return builder.build()
     }
 }
+</content>
