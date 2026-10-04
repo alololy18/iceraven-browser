@@ -397,6 +397,10 @@ class SettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFragment 
                     SettingsFragmentDirections.actionSettingsFragmentToCustomizationFragment()
                 }
 
+                resources.getString(R.string.pref_key_feed_limiter) -> {
+                    SettingsFragmentDirections.actionSettingsFragmentToFeedLimiterSettingsFragment()
+                }
+
                 resources.getString(R.string.pref_key_passwords) -> {
                     SettingsMetrics.passwords.record()
                     SettingsFragmentDirections.actionSettingsFragmentToSavedLoginsAuthFragment()
@@ -430,6 +434,10 @@ class SettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFragment 
 
                 resources.getString(R.string.pref_key_ai_controls) -> {
                     SettingsFragmentDirections.actionSettingsFragmentToAiControlsFragment()
+                }
+
+                resources.getString(R.string.pref_key_feed_limiter) -> {
+                    SettingsFragmentDirections.actionSettingsFragmentToFeedLimiterSettingsFragment()
                 }
 
                 // Privacy and security preferences

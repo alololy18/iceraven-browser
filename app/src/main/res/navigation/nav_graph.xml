@@ -754,6 +754,14 @@
             app:popExitAnim="@anim/slide_out_right"
             app:popUpTo="@id/settingsFragment" />
         <action
+            android:id="@+id/action_settingsFragment_to_feedLimiterSettingsFragment"
+            app:destination="@id/feedLimiterSettingsFragment"
+            app:enterAnim="@anim/slide_in_right"
+            app:exitAnim="@anim/slide_out_left"
+            app:popEnterAnim="@anim/slide_in_left"
+            app:popExitAnim="@anim/slide_out_right"
+            app:popUpTo="@id/settingsFragment" />
+        <action
             android:id="@+id/action_settingsFragment_to_addonsFragment"
             app:destination="@id/addons_management_graph"
             app:enterAnim="@anim/slide_in_right"
@@ -928,6 +936,32 @@
             android:defaultValue="@null"
             app:argType="string"
             app:nullable="true" />
+    </fragment>
+    <fragment
+        android:id="@+id/feedLimiterSettingsFragment"
+        android:name="org.mozilla.fenix.feedlimiter.FeedLimiterSettingsFragment"
+        android:label="@string/preferences_feed_limiter">
+        <action
+            android:id="@+id/action_feedLimiterSettingsFragment_to_feedLimiterConfirmFragment"
+            app:destination="@id/feedLimiterConfirmFragment"
+            app:enterAnim="@anim/slide_in_right"
+            app:exitAnim="@anim/slide_out_left"
+            app:popEnterAnim="@anim/slide_in_left"
+            app:popExitAnim="@anim/slide_out_right" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/feedLimiterConfirmFragment"
+        android:name="org.mozilla.fenix.feedlimiter.FeedLimiterConfirmFragment">
+        <argument
+            android:name="feedLimiterConfirmSite"
+            app:argType="string" />
+        <argument
+            android:name="feedLimiterConfirmActionType"
+            app:argType="string" />
+        <argument
+            android:name="feedLimiterConfirmNewLimit"
+            app:argType="integer" />
     </fragment>
     <fragment
         android:id="@+id/dataChoicesFragment"

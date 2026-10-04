@@ -348,6 +348,9 @@
     <!-- AI Controls settings -->
     <!-- Title for the AI controls settings screen -->
     <string name="preferences_ai_controls">AI controls</string>
+    <!-- Feed Limiter settings -->
+    <!-- Title for the Feed Limiter settings screen -->
+    <string name="preferences_feed_limiter">Feed Limiter</string>
     <!-- Headline text for the AI controls banner. %s is the name of the app (for example "Firefox"). -->
     <string name="ai_controls_banner_headline">You always have a choice in %s</string>
     <!-- Supporting text for the AI controls banner. %s is a learn more link using ai_controls_learn_more as text. -->

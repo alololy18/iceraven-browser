@@ -19,7 +19,7 @@ import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
-import org.mozilla.fenix.R
+import androidx.navigation.fragment.navArgs
 
 /**
  * Generic friction/cooldown confirm screen, reused for all three
@@ -48,15 +48,18 @@ import org.mozilla.fenix.R
  */
 class FeedLimiterConfirmFragment : Fragment() {
 
-    private val site: String by lazy { requireArguments().getString(ARG_SITE)!! }
-    private val action: FeedLimiterLoosenAction by lazy { actionFromArgs(requireArguments()) }
+    // Safe-Args generated accessor - requires feedLimiterConfirmFragment's
+    // three <argument> entries (site/actionType/newLimit) to be declared in
+    // nav_graph.xml exactly as the Phase 2 sync instructions specify, since
+    // FeedLimiterConfirmFragmentArgs is generated from that XML at build
+    // time and won't exist/compile until those arguments are in place.
+    private val args by navArgs<FeedLimiterConfirmFragmentArgs>()
+    private val site: String get() = args.feedLimiterConfirmSite
+    private val action: FeedLimiterLoosenAction by lazy { actionFromArgs() }
 
     private val viewModel: FeedLimiterConfirmViewModel by viewModels {
         val bridge = FeedLimiterBridgeHolder.instance
-        val duration = bridge.getFrictionDurationMinutes(
-            site,
-            requireArguments().getString(ARG_ACTION_TYPE)!!
-        )
+        val duration = bridge.getFrictionDurationMinutes(site, args.feedLimiterConfirmActionType)
         FeedLimiterConfirmViewModel.Factory(action, duration, bridge)
     }
 
@@ -128,40 +131,34 @@ class FeedLimiterConfirmFragment : Fragment() {
         viewLifecycleOwner.lifecycle.addObserver(lifecycleObserver)
     }
 
-    companion object {
-        const val ARG_SITE = "feed_limiter_confirm_site"
-        const val ARG_ACTION_TYPE = "feed_limiter_confirm_action_type"
-        const val ARG_NEW_LIMIT = "feed_limiter_confirm_new_limit"
+    // Instance method, not companion - needs `site` and `args`, both of
+    // which are per-instance (Safe-Args-backed) properties above.
+    private fun actionFromArgs(): FeedLimiterLoosenAction {
+        return when (val type = args.feedLimiterConfirmActionType) {
+            TYPE_DISABLE_POST_CAP -> FeedLimiterLoosenAction.DisablePostCap(site)
+            TYPE_DISABLE_TIMER_CAP -> FeedLimiterLoosenAction.DisableTimerCap(site)
+            TYPE_DISABLE_SITE -> FeedLimiterLoosenAction.DisableSite(site)
+            TYPE_RAISE_POST_LIMIT -> FeedLimiterLoosenAction.RaisePostLimit(site, args.feedLimiterConfirmNewLimit)
+            else -> throw IllegalArgumentException("Unknown feed limiter confirm action type: $type")
+        }
+    }
 
+    companion object {
         private const val TYPE_DISABLE_POST_CAP = "disable_post_cap"
         private const val TYPE_DISABLE_TIMER_CAP = "disable_timer_cap"
         private const val TYPE_RAISE_POST_LIMIT = "raise_post_limit"
         private const val TYPE_DISABLE_SITE = "disable_site"
 
         /** Encodes a FeedLimiterLoosenAction's type as a plain string for
-         *  bundle args - kept here rather than as a property on the sealed
-         *  class itself so FeedLimiterSettingsModel.kt (shared with the
-         *  bridge/adapter) doesn't need to know about Fragment-argument
-         *  wire formats at all. */
+         *  the nav-graph argument - kept here rather than as a property on
+         *  the sealed class itself so FeedLimiterSettingsModel.kt (shared
+         *  with the bridge/adapter) doesn't need to know about Fragment
+         *  navigation wire formats at all. */
         fun wireTypeFor(action: FeedLimiterLoosenAction): String = when (action) {
             is FeedLimiterLoosenAction.DisablePostCap -> TYPE_DISABLE_POST_CAP
             is FeedLimiterLoosenAction.DisableTimerCap -> TYPE_DISABLE_TIMER_CAP
             is FeedLimiterLoosenAction.RaisePostLimit -> TYPE_RAISE_POST_LIMIT
             is FeedLimiterLoosenAction.DisableSite -> TYPE_DISABLE_SITE
-        }
-
-        private fun actionFromArgs(args: Bundle): FeedLimiterLoosenAction {
-            val site = args.getString(ARG_SITE)!!
-            return when (val type = args.getString(ARG_ACTION_TYPE)) {
-                TYPE_DISABLE_POST_CAP -> FeedLimiterLoosenAction.DisablePostCap(site)
-                TYPE_DISABLE_TIMER_CAP -> FeedLimiterLoosenAction.DisableTimerCap(site)
-                TYPE_DISABLE_SITE -> FeedLimiterLoosenAction.DisableSite(site)
-                TYPE_RAISE_POST_LIMIT -> FeedLimiterLoosenAction.RaisePostLimit(
-                    site,
-                    args.getInt(ARG_NEW_LIMIT)
-                )
-                else -> throw IllegalArgumentException("Unknown feed limiter confirm action type: $type")
-            }
         }
     }
 }

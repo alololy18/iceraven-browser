@@ -9,9 +9,9 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
+import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import org.mozilla.fenix.R
 // IMPORTANT: add `import <your app's base package>.R` here once this file
 // moves into your fork - e.g. `import org.mozilla.fenix.R`. Because this
 // file lives in the org.mozilla.fenix.feedlimiter SUB-package, Kotlin will
@@ -32,11 +32,13 @@ import org.mozilla.fenix.R
  * for the "turning on" direction, FeedLimiterLoosenAction.applying() for
  * the "turning off/raising" direction).
  *
- * CAVEAT: not yet wired into any nav graph or hosting Activity - see
- * navigateToConfirm() below and the Phase 2 wiring instructions for what's
- * still a placeholder. This Fragment will compile and the row logic can be
- * unit-tested in isolation, but it isn't reachable from the app's actual
- * Settings menu until that wiring is done.
+ * Navigation to the confirm screen goes through this fork's nav graph
+ * (Safe Args), matching how every other Settings sub-screen in this app
+ * navigates - see navigateToConfirm() below. This requires
+ * feedLimiterSettingsFragment and feedLimiterConfirmFragment to both be
+ * registered as real destinations in nav_graph.xml, with an action between
+ * them named action_feedLimiterSettingsFragment_to_feedLimiterConfirmFragment
+ * - see the Phase 2 sync instructions for the exact XML.
  */
 class FeedLimiterSettingsFragment : Fragment(), FeedLimiterRowListener {
 
@@ -126,25 +128,13 @@ class FeedLimiterSettingsFragment : Fragment(), FeedLimiterRowListener {
     }
 
     private fun navigateToConfirm(action: FeedLimiterLoosenAction) {
-        val args = Bundle().apply {
-            putString(FeedLimiterConfirmFragment.ARG_SITE, action.site)
-            putString(FeedLimiterConfirmFragment.ARG_ACTION_TYPE, FeedLimiterConfirmFragment.wireTypeFor(action))
-            if (action is FeedLimiterLoosenAction.RaisePostLimit) {
-                putInt(FeedLimiterConfirmFragment.ARG_NEW_LIMIT, action.newLimit)
-            }
-        }
-        // PLACEHOLDER NAVIGATION - this fork's real nav graph and Settings
-        // container id aren't available from here. R.id.feed_limiter_settings_container
-        // below is a stand-in you need to replace with wherever this
-        // Fragment actually ends up hosted (most forks' Settings flow uses
-        // a single shared fragment container across all settings screens -
-        // find that id and use it here, or better, add a proper nav-graph
-        // action from this screen to FeedLimiterConfirmFragment and call
-        // findNavController().navigate(...) instead of a raw
-        // FragmentTransaction). See the Phase 2 wiring instructions.
-        parentFragmentManager.beginTransaction()
-            .replace(R.id.feed_limiter_settings_container, FeedLimiterConfirmFragment().apply { arguments = args })
-            .addToBackStack("feed_limiter_confirm")
-            .commit()
+        val newLimit = (action as? FeedLimiterLoosenAction.RaisePostLimit)?.newLimit ?: 0
+        val directions = FeedLimiterSettingsFragmentDirections
+            .actionFeedLimiterSettingsFragmentToFeedLimiterConfirmFragment(
+                feedLimiterConfirmSite = action.site,
+                feedLimiterConfirmActionType = FeedLimiterConfirmFragment.wireTypeFor(action),
+                feedLimiterConfirmNewLimit = newLimit,
+            )
+        findNavController().navigate(directions)
     }
 }
