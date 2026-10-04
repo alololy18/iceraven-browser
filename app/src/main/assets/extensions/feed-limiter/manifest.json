@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
   "name": "Feed Limiter (Phase 1 dev build)",
-  "version": "0.2.0",
-  "description": "Core post-cap/timer-cap counting and blocking logic for Instagram, X, TikTok, Facebook, Reddit, LinkedIn, and YouTube Shorts. Phase 1: sideload-only/built-in, no native settings UI or friction/cooldown gate yet (Phase 2), no custom sites or regular YouTube (Phase 3).",
+  "version": "0.3.0",
+  "description": "Core post-cap/timer-cap counting and blocking logic for Instagram, X, TikTok, Facebook, Reddit, LinkedIn, and YouTube Shorts. Phase 2: native settings UI + friction/cooldown gate, synced to the background script via native messaging.",
   "permissions": [
     "storage",
     "tabs",
@@ -10,6 +10,8 @@
     "webRequest",
     "webRequestBlocking",
     "alarms",
+    "nativeMessaging",
+    "geckoViewAddons",
     "*://*.instagram.com/*",
     "*://*.x.com/*",
     "*://*.twitter.com/*",

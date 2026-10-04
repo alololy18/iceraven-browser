@@ -73,6 +73,7 @@ async function registerPostsSeen(site, count) {
     console.log(`[feed-limiter] ${site} capped on posts (${entry.postsSeen})`);
   }
   await setEntry(site, entry);
+  sendCountsUpdate(site, entry);
   return entry;
 }
 
@@ -86,6 +87,7 @@ async function tickTimer(site) {
     await redirectSiteTabsToInterstitial(site);
   }
   await setEntry(site, entry);
+  sendCountsUpdate(site, entry);
 }
 
 async function isBlocked(site) {
@@ -175,9 +177,34 @@ async function currentForegroundSite() {
   }
 }
 
-browser.windows.onFocusChanged.addListener((windowId) => {
-  windowFocused = windowId !== browser.windows.WINDOW_ID_NONE;
-});
+// FIX (timer-stuck-at-zero bug): `browser.windows` is a UI-scoped API that
+// GeckoView does NOT implement on Android (confirmed - windows/tabs-UI
+// hooks are out of scope for GeckoView's WebExtension support, unlike
+// tabs/alarms/webRequest which were specifically patched in). The old,
+// unguarded `browser.windows.onFocusChanged.addListener(...)` call below
+// threw a synchronous TypeError ("Cannot read properties of undefined")
+// the instant this background script loaded on-device - and since that
+// statement sat ABOVE browser.alarms.create(...) in file order, the
+// uncaught exception aborted the rest of this top-level script before it
+// ever got there. Net effect: the alarm was never created, onAlarm was
+// never registered, tickTimer() was never called - the timer silently
+// never ran at all, while everything registered earlier in the file
+// (onMessage, onBeforeNavigate) kept working fine, which is exactly the
+// "posts count, timer doesn't" symptom reported on-device.
+// Fix: feature-detect before touching browser.windows, and fall back to
+// tabVisibility as the sole signal (it's the trusted one on Android
+// anyway per the comment above tabVisibility) - windowFocused just stays
+// true as a harmless default when browser.windows isn't there.
+if (browser.windows && browser.windows.onFocusChanged) {
+  browser.windows.onFocusChanged.addListener((windowId) => {
+    windowFocused = windowId !== browser.windows.WINDOW_ID_NONE;
+  });
+} else {
+  console.log(
+    "[feed-limiter] browser.windows unavailable (expected on GeckoView/Android) - " +
+      "relying on tabVisibility only, windowFocused stays true"
+  );
+}
 
 // 1-minute resolution via the alarms API rather than setInterval, so
 // tracking survives the background page being suspended/restarted.
@@ -250,3 +277,70 @@ async function hydrateBlockedCache() {
   }
 }
 hydrateBlockedCache();
+
+// --- native bridge (Phase 2 Settings UI sync) ---
+// FIX (settings-page-shows-no-counts bug): nothing in this file previously
+// connected to the native side at all, so FeedLimiterExtensionBridge.kt's
+// onConnect/onPortMessage never fired, _liveUsage stayed permanently
+// empty, and the native Settings screen had nothing to display. This
+// section establishes that connection, applies settings pushed down from
+// the native Settings screen onto the (previously hardcoded-only)
+// FEED_LIMITER_CONFIG, and reports live usage back up after every count
+// change.
+//
+// Requires "nativeMessaging" and "geckoViewAddons" permissions in
+// manifest.json (added alongside this fix) - without those,
+// browser.runtime.connectNative throws / is undefined, even for a
+// built-in extension. "feedlimiter" below MUST exactly match the
+// nativeApp string GeckoProvider.kt passes to
+// webExtension.setMessageDelegate(feedLimiterBridge, "feedlimiter").
+let nativePort = null;
+
+function connectNative() {
+  try {
+    nativePort = browser.runtime.connectNative("feedlimiter");
+  } catch (e) {
+    console.error("[feed-limiter] connectNative failed", e);
+    return;
+  }
+
+  nativePort.onMessage.addListener((msg) => {
+    if (msg?.type === "feed-limiter:settings-snapshot") {
+      applySettingsSnapshot(msg.settings);
+    }
+  });
+
+  nativePort.onDisconnect.addListener(() => {
+    console.log("[feed-limiter] native port disconnected - retrying in 5s");
+    nativePort = null;
+    setTimeout(connectNative, 5000);
+  });
+
+  // Ask native for whatever it already has as soon as the port is up,
+  // rather than waiting for the user to touch something in Settings.
+  nativePort.postMessage({ type: "feed-limiter:request-settings" });
+}
+
+// Merges native-pushed per-site overrides (e.g. a new postLimit/
+// timerMinutesLimit the user set in the Settings screen) onto the
+// hardcoded defaults in config.js, so Phase 2's Settings UI actually
+// takes effect here instead of being silently ignored.
+function applySettingsSnapshot(settings) {
+  if (!settings) return;
+  for (const [site, override] of Object.entries(settings)) {
+    if (!FEED_LIMITER_CONFIG.sites[site]) continue;
+    Object.assign(FEED_LIMITER_CONFIG.sites[site], override);
+  }
+  console.log("[feed-limiter] applied native settings snapshot", settings);
+}
+
+function sendCountsUpdate(site, entry) {
+  if (!nativePort) return;
+  try {
+    nativePort.postMessage({ type: "feed-limiter:counts-update", site, entry });
+  } catch (e) {
+    console.error("[feed-limiter] failed to send counts-update", e);
+  }
+}
+
+connectNative();

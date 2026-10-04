@@ -30,6 +30,29 @@ function countNewPosts(addedNodes) {
   return newCount;
 }
 
+// FIX (live-count-not-updating-while-scrolling bug): MutationObserver only
+// fires for actual DOM node insertions/removals (childList mutations).
+// Instagram - like most infinite-scroll feeds - is known to virtualize
+// and recycle rendered rows for performance, which can mean a post
+// becomes visible without any *new* <article> node ever being inserted
+// under the observed root (an existing, already-seen node gets reused/
+// repositioned instead). That would make the observer correctly fire
+// zero times during a scroll session, even though more posts were
+// genuinely viewed - matching exactly the reported symptom (counter is
+// flat while scrolling, then jumps once on the next full page load/
+// refresh, which does a fresh one-shot countNewPosts over whatever's
+// actually in the DOM at that instant).
+// This is not a confirmed root cause without live devtools inspection on
+// a real device, so as a safety net - independent of whatever the real
+// cause turns out to be - this adds a periodic full re-scan of the whole
+// root alongside the existing observer, piggybacking on the same 10s
+// interval already used to refresh the on-page badge. A full
+// countNewPosts() pass is deduped by the same `seenPosts` WeakSet as the
+// observer, so this is a safe, idempotent supplement, not a double-count.
+function rescanForMissedPosts(root) {
+  reportPostsAndRefreshBadge(countNewPosts([root]));
+}
+
 function reportPosts(count) {
   if (count <= 0) return;
   browser.runtime.sendMessage({ type: "feed-limiter:posts-seen", site: SITE, count });
@@ -54,8 +77,12 @@ function start() {
   badge = feedLimiterCreateBadge();
   feedLimiterRefreshBadge(badge, SITE);
   // Timer-cap minutes tick in the background independent of scrolling,
-  // so refresh periodically too, not just on new posts.
-  setInterval(() => feedLimiterRefreshBadge(badge, SITE), 10000);
+  // so refresh periodically too, not just on new posts. Also doubles as
+  // the periodic rescan safety net above (see rescanForMissedPosts).
+  setInterval(() => {
+    feedLimiterRefreshBadge(badge, SITE);
+    rescanForMissedPosts(root);
+  }, 10000);
 
   observer.observe(root, { childList: true, subtree: true });
   // Count whatever's already rendered on load, not just future insertions.
