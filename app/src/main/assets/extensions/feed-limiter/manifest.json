@@ -68,7 +68,7 @@
       "all_frames": false
     }
   ],
-  "web_accessible_resources": ["interstitial.html", "config.js"],
+  "web_accessible_resources": ["interstitial.html", "config.js", "images/activities/*"],
   "browser_specific_settings": {
     "gecko": {
       "id": "feed-limiter-dev@personal.local",

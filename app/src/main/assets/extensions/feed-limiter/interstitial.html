@@ -2,32 +2,33 @@
 <html>
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Feed Limiter</title>
-<style>
-  body {
-    font-family: system-ui, -apple-system, sans-serif;
-    max-width: 480px;
-    margin: 15vh auto 0;
-    padding: 0 24px;
-    text-align: center;
-    color: #222;
-  }
-  h1 { font-size: 1.4rem; margin-bottom: 8px; }
-  p.sub { color: #666; font-size: 0.95rem; }
-  ul { list-style: none; padding: 0; margin: 24px 0; }
-  li {
-    background: #f2f2f2;
-    border-radius: 8px;
-    padding: 14px;
-    margin: 10px 0;
-    font-size: 1.05rem;
-  }
-</style>
+<link rel="stylesheet" href="interstitial.css">
 </head>
 <body>
-  <h1>That's your cap for today</h1>
-  <p class="sub">This resets at local midnight. In the meantime:</p>
-  <ul id="activities"></ul>
+  <!--
+    Passive, non-interactive full-screen interstitial. No buttons, links,
+    or gesture targets anywhere on this page - it only clears via the
+    daily local-midnight reset or a friction-gated settings change
+    elsewhere in the app. See interstitial.js for the random activity
+    selection (unchanged) and the display-label/image lookup used to
+    populate the three bands below.
+  -->
+  <div id="bands">
+    <section class="band" id="band-0">
+      <div class="band-scrim"></div>
+      <p class="band-label"></p>
+    </section>
+    <section class="band" id="band-1">
+      <div class="band-scrim"></div>
+      <p class="band-label"></p>
+    </section>
+    <section class="band" id="band-2">
+      <div class="band-scrim"></div>
+      <p class="band-label"></p>
+    </section>
+  </div>
   <script src="config.js"></script>
   <script src="interstitial.js"></script>
 </body>
