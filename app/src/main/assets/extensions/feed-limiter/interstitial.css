@@ -1,0 +1,81 @@
+/* Feed Limiter interstitial - banded-sections photographic layout.
+   Passive dead screen: no tap targets, no scroll, no chrome. */
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #000; /* fallback while band images load */
+  overflow: hidden; /* never scrollable - all 3 bands always visible at once */
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* FIX (on-device bug: bands collapsed to ~content height instead of
+   filling the screen, leaving blank white space below three thin
+   strips). Root cause: the layout depended on html/body height:100%
+   plus #bands height:100vh/100dvh. On the real Galaxy S21 FE/GeckoView,
+   that chain resolved to an effectively-zero height, so each flex child
+   (flex-basis:0) shrank to its minimum content size - just the label's
+   line height - instead of a third of the screen.
+   FIX: anchor #bands with position:fixed + inset:0 instead. Fixed
+   positioning sizes against the real viewport directly (the initial
+   containing block), independent of vh/dvh support and of html/body's
+   own height - this is the robust fix for embedded WebView/GeckoView
+   contexts where viewport-unit resolution can be unreliable. */
+#bands {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Exactly 3 equal bands, edge-to-edge, no gaps/margins. flex-basis:0 with
+   equal grow keeps the thirds exact regardless of label content/wrapping -
+   target is 1080x800 per band at the 1080x2400 reference resolution. */
+.band {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-color: #1a1a1a; /* visible neutral placeholder if an image is missing/not yet generated */
+}
+
+/* Soft dark scrim across the bottom ~35% of the band only, so the label
+   stays legible without flattening the photo above it. */
+.band-scrim {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 35%;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.55) 100%);
+  pointer-events: none;
+}
+
+/* One-line (max two short lines) label, bottom-left, identical 24px
+   padding from left/bottom edges on every band. Label only - no
+   subtext/description line. */
+.band-label {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  bottom: 24px;
+  margin: 0;
+  color: #ffffff;
+  font-size: 21px;
+  font-weight: 500;
+  line-height: 1.25;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
