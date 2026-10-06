@@ -1,40 +1,88 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  PLACEHOLDER - plain RecyclerView in a vertical LinearLayout with a title
-  bar; not matched to this fork's actual Settings-screen chrome/toolbar
-  styling (unknown from here - the real Settings screen likely already
-  supplies its own ActionBar/toolbar via the hosting Activity/nav graph, in
-  which case the inner title TextView below is probably redundant and can
-  be deleted once this is wired into the real nav graph).
--->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:orientation="vertical">
+    android:layout_height="match_parent">
 
     <TextView
+        android:id="@+id/tvFeedLimiterUnavailable"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:padding="16dp"
-        android:text="Feed Limiter"
-        android:textSize="20sp"
-        android:textStyle="bold" />
+        android:padding="24dp"
+        android:text="@string/feed_limiter_unavailable"
+        android:textSize="16sp"
+        android:visibility="gone" />
 
-    <TextView
+    <LinearLayout
+        android:id="@+id/feedLimiterContent"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:paddingHorizontal="16dp"
-        android:paddingBottom="8dp"
-        android:text="Built-in sites. Custom sites and YouTube come in a later update."
-        android:textSize="13sp"
-        android:alpha="0.7" />
+        android:layout_height="match_parent"
+        android:orientation="vertical">
 
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/recyclerFeedLimiterSites"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:clipToPadding="false"
-        android:paddingBottom="16dp" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="16dp"
+            android:paddingTop="16dp"
+            android:text="@string/feed_limiter_low_saturation_title"
+            android:textSize="16sp"
+            android:textStyle="bold" />
 
-</LinearLayout>
+        <!-- saveEnabled=false: restored check state would re-fire the listener with a stale value. -->
+        <RadioGroup
+            android:id="@+id/radioLowSaturation"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingHorizontal="12dp"
+            android:saveEnabled="false">
+
+            <RadioButton
+                android:id="@+id/radioLowSaturationOff"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:saveEnabled="false"
+                android:text="@string/feed_limiter_low_saturation_off" />
+
+            <RadioButton
+                android:id="@+id/radioLowSaturationAll"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:saveEnabled="false"
+                android:text="@string/feed_limiter_low_saturation_all" />
+
+            <RadioButton
+                android:id="@+id/radioLowSaturationSelected"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:saveEnabled="false"
+                android:text="@string/feed_limiter_low_saturation_selected" />
+        </RadioGroup>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:alpha="0.7"
+            android:paddingHorizontal="16dp"
+            android:text="@string/feed_limiter_low_saturation_summary"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/btnAddSite"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="12dp"
+            android:layout_marginTop="8dp"
+            android:text="@string/feed_limiter_add_site" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/recyclerFeedLimiterSites"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:clipToPadding="false"
+            android:paddingBottom="16dp" />
+    </LinearLayout>
+</FrameLayout>

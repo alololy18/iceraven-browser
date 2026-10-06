@@ -224,6 +224,7 @@ import org.mozilla.fenix.ext.runIfFragmentIsAttached
 import org.mozilla.fenix.ext.secure
 import org.mozilla.fenix.ext.tabClosedUndoMessage
 import org.mozilla.fenix.ext.updateMicrosurveyPromptForConfigurationChange
+import org.mozilla.fenix.feedlimiter.FeedLimiterBridgeHolder
 import org.mozilla.fenix.messaging.FenixMessageSurfaceId
 import org.mozilla.fenix.messaging.MessagingFeature
 import org.mozilla.fenix.microsurvey.ui.MicrosurveyRequestPrompt
@@ -2216,6 +2217,7 @@ abstract class BaseBrowserFragment :
     final override fun onPictureInPictureModeChanged(isInPipMode: Boolean) {
         if (isInPipMode) MediaState.pictureInPicture.record(NoExtras())
         pipFeature?.onPictureInPictureModeChanged(isInPipMode)
+        FeedLimiterBridgeHolder.instance?.setPictureInPicture(isInPipMode)
     }
 
     @VisibleForTesting

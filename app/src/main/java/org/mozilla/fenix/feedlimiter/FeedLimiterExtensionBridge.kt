@@ -1,101 +1,76 @@
 package org.mozilla.fenix.feedlimiter
 
-// PLACEHOLDER PACKAGE - replace "org.mozilla.fenix.feedlimiter" above (and
-// in FeedLimiterSettingsModel.kt) with <your fork's actual Kotlin package
-// root>.feedlimiter once you've found it. The Kotlin package does NOT have
-// to match your applicationId/package name exactly - Fenix's own Kotlin
-// source lives under org.mozilla.fenix regardless of which applicationId a
-// build variant uses - so just open any existing .kt file under
-// app/src/main/java/ in your fork and reuse whatever its `package` line
-// says as the root, then append ".feedlimiter". See the grep command in
-// the final Phase 2 sync instructions if you want to confirm the
-// applicationId itself too.
-
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
+import org.json.JSONException
 import org.json.JSONObject
+import org.mozilla.fenix.R
 import org.mozilla.geckoview.WebExtension
 import org.mozilla.geckoview.WebExtension.Port
 import org.mozilla.geckoview.WebExtension.PortDelegate
 
 /**
- * Native half of the Phase 2 native<->extension bridge. Construct ONE
- * instance of this (it owns persisted state) and register it once, at the
- * same place Phase 0/1 already calls extension.installBuiltIn() for this
- * extension:
+ * Native half of the settings bridge, and the source of truth for every site's
+ * settings. The extension only mirrors the last snapshot pushed from here.
  *
- *     val feedLimiterExtensionBridge = FeedLimiterExtensionBridge(context)
- *     extension.setMessageDelegate(feedLimiterExtensionBridge, "feedlimiter")
- *
- * "feedlimiter" MUST exactly match the nativeApp string background.js
- * passes to browser.runtime.connectNative("feedlimiter") - see
- * connectToNative() in feed-limiter-extension/background.js. Keep a
- * reference to this instance wherever your fork wires up GeckoView
- * init (same place/class as installBuiltIn()) and hand it to the
- * Settings screen's ViewModel too - see the wiring instructions for the
- * exact call site once that's written.
- *
- * CAVEAT: unverified against a live build of your fork. This follows
- * GeckoView's public WebExtension.MessageDelegate / Port / PortDelegate API
- * shape as documented, but hasn't been compiled against your fork's actual
- * GeckoView version yet. Two likely failure modes and how to debug them:
- *
- *   1. Doesn't compile - the three `org.mozilla.geckoview.WebExtension.*`
- *      import lines above are the most likely mismatch point. Open
- *      whatever file in your fork already calls installBuiltIn() and check
- *      how it imports WebExtension - Port/PortDelegate have moved between
- *      nested and top-level positions across GeckoView releases, and your
- *      fork may be pinned to an older/newer one than this assumes.
- *   2. Compiles, but the Settings screen never shows live data - add a
- *      `Log.d("FeedLimiter", "onConnect fired")` inside onConnect() below.
- *      If it never logs, setMessageDelegate() isn't actually wired up at
- *      the real installBuiltIn() call site yet (see wiring instructions).
- *      If it logs but the extension never gets a snapshot, check
- *      about:debugging's "Inspect" console on the background page for
- *      errors from connectToNative() in background.js.
+ * State is held in plain fields and mirrored into LiveData, because
+ * LiveData.postValue is asynchronous: reading `.value` right after posting
+ * returns the previous value, which used to push stale snapshots.
  */
 class FeedLimiterExtensionBridge(context: Context) : WebExtension.MessageDelegate, PortDelegate {
 
     private val prefs: SharedPreferences =
         context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     private var port: Port? = null
+    private var currentSettings: Map<String, SiteSettings> = loadSettings()
+    private var currentLowSaturation: LowSaturationMode = loadLowSaturation()
+    private var currentUsage: Map<String, SiteUsage> = emptyMap()
+    private var pictureInPicture = false
 
-    private val _settings = MutableLiveData(loadSettings())
-    /** Current per-site settings, as a LiveData the Settings screen's
-     *  ViewModel can observe directly. This map IS the source of truth on
-     *  the native side as of Phase 2 - the extension side only ever
-     *  mirrors whatever was last pushed here. */
-    val settings: LiveData<Map<String, BuiltInSiteSettings>> get() = _settings
+    private val _settings = MutableLiveData(currentSettings)
+    val settings: LiveData<Map<String, SiteSettings>> get() = _settings
 
+    private val _lowSaturation = MutableLiveData(currentLowSaturation)
+    val lowSaturation: LiveData<LowSaturationMode> get() = _lowSaturation
+
+    // Empty for a site until the extension reports it; treat missing as zero.
     private val _liveUsage = MutableLiveData<Map<String, SiteUsage>>(emptyMap())
-    /** Most recently reported per-site usage for today, pushed up from
-     *  background.js whenever a post/timer tick happens. Best-effort/live
-     *  only - stays empty for a site until the extension's background page
-     *  connects and sends its first counts-update, so the Settings screen
-     *  should treat a missing entry as "0 so far", not an error. */
     val liveUsage: LiveData<Map<String, SiteUsage>> get() = _liveUsage
 
-    // --- WebExtension.MessageDelegate ---------------------------------
+    fun settingsFor(site: String): SiteSettings? = currentSettings[site]
+
+    // --- WebExtension.MessageDelegate ----------------------------------------
 
     override fun onConnect(port: Port) {
         this.port = port
         port.setDelegate(this)
-        // Send proactively rather than waiting for the extension's
-        // request-settings handshake - covers both orderings (native
-        // ready first, or extension ready first) without extra state.
+        // Sent without waiting for request-settings so either side can start first.
         pushSettingsSnapshot()
+        pushPictureInPicture()
     }
 
-    // --- PortDelegate ---------------------------------------------------
+    // --- PortDelegate --------------------------------------------------------
 
     override fun onPortMessage(message: Any, port: Port) {
-        val json = message as? JSONObject ?: return
-        when (json.optString("type")) {
-            "feed-limiter:request-settings" -> pushSettingsSnapshot()
-            "feed-limiter:counts-update" -> handleCountsUpdate(json)
+        val json = message as? JSONObject
+        if (json == null) {
+            Log.w(LOG_TAG, "Ignoring non-JSON port message: ${message.javaClass.name}")
+            return
+        }
+        // LiveData can only be set on the main thread.
+        runOnMain {
+            when (val type = json.optString("type")) {
+                MSG_REQUEST_SETTINGS -> pushSettingsSnapshot()
+                MSG_COUNTS_UPDATE -> handleCountsUpdate(json)
+                else -> Log.w(LOG_TAG, "Ignoring port message with unknown type '$type'")
+            }
         }
     }
 
@@ -103,135 +78,252 @@ class FeedLimiterExtensionBridge(context: Context) : WebExtension.MessageDelegat
         if (this.port === port) this.port = null
     }
 
-    // --- called by the Settings / confirm screens ------------------------
+    // --- called by the settings and confirm screens ---------------------------
 
-    /** Applies one site's new settings: persists immediately, updates the
-     *  LiveData the Settings screen observes, and pushes the full updated
-     *  snapshot down to the extension so enforcement picks it up on the
-     *  very next post/timer tick - no background-page restart needed.
-     *  Both the plain settings screen (for tightening a cap, which needs
-     *  no friction) and the confirm/cooldown screen (for loosening one,
-     *  once its countdown completes) should call this same method - the
-     *  friction gate is a UI-layer concern only, not a bridge concern. */
-    fun updateSiteSettings(site: String, newSettings: BuiltInSiteSettings) {
-        if (site !in BUILT_IN_SITES) return
-        val current = _settings.value.orEmpty().toMutableMap()
-        current[site] = newSettings
-        persistSettings(current)
-        _settings.postValue(current)
+    /** Applies changes that need no countdown. Returns false if they were rejected. */
+    fun updateSiteSettings(site: String, newSettings: SiteSettings): Boolean {
+        if (site !in currentSettings) {
+            Log.w(LOG_TAG, "Rejected update for unknown site $site")
+            return false
+        }
+        validationError(site, newSettings)?.let {
+            Log.w(LOG_TAG, "Rejected settings for $site: $it")
+            return false
+        }
+        commitSettings(currentSettings + (site to newSettings))
+        return true
+    }
+
+    fun addCustomSite(input: String, timerMinutesLimit: Int): DomainResult {
+        val result = normalizeCustomDomain(input, currentSettings.keys)
+        if (result !is DomainResult.Valid) return result
+        val siteSettings = newCustomSite(timerMinutesLimit)
+        validationError(result.domain, siteSettings)?.let {
+            Log.w(LOG_TAG, "Rejected new custom site ${result.domain}: $it")
+            return DomainResult.Invalid(R.string.feed_limiter_domain_error_invalid)
+        }
+        commitSettings(currentSettings + (result.domain to siteSettings))
+        return result
+    }
+
+    /** Commits a countdown-confirmed change, including removing a custom site. */
+    fun applyConfirmedLoosen(action: FeedLimiterLoosenAction): Boolean {
+        val current = currentSettings[action.site]
+        if (current == null) {
+            Log.w(LOG_TAG, "Confirmed $action for a site that no longer exists")
+            return false
+        }
+        val updated = current.applying(action)
+        if (updated != null) return updateSiteSettings(action.site, updated)
+        if (current.type != SiteType.CUSTOM) {
+            Log.w(LOG_TAG, "Refusing to remove non-custom site ${action.site}")
+            return false
+        }
+        // The extension keeps today's counts, so re-adding the site the same day keeps its usage.
+        commitSettings(currentSettings - action.site)
+        return true
+    }
+
+    fun setLowSaturationMode(mode: LowSaturationMode) {
+        if (mode == currentLowSaturation) return
+        currentLowSaturation = mode
+        prefs.edit().putString(PREFS_KEY_LOW_SATURATION, mode.wireValue).apply()
+        _lowSaturation.value = mode
         pushSettingsSnapshot()
     }
 
-    // --- friction/cooldown duration preferences (feature list item 22) ---
-    // Per-site, per-loosening-action duration, in minutes, defaulting to 15
-    // (item 23/24's stated default) until explicitly changed. Stored
-    // separately from the site settings themselves since these are a
-    // Settings-screen preference about HOW the gate behaves, not part of
-    // what gets pushed to the extension - the extension never needs to
-    // know these values at all, only native does.
-    //
-    // CAVEAT: FeedLimiterSettingsFragment doesn't yet expose a UI control
-    // to change these (item 22 isn't built out as an actual settings row
-    // yet) - getFrictionDurationMinutes()/setFrictionDurationMinutes() are
-    // ready for that control to call once it exists; until then, every
-    // site/action combination simply uses the 15-minute default.
-    fun getFrictionDurationMinutes(site: String, actionWireType: String): Int {
-        return prefs.getInt(frictionDurationKey(site, actionWireType), DEFAULT_FRICTION_DURATION_MINUTES)
+    /** Called from the browser screen; PiP must not count toward the timer even though the page stays visible. */
+    fun setPictureInPicture(active: Boolean) {
+        runOnMain {
+            pictureInPicture = active
+            pushPictureInPicture()
+        }
     }
 
-    fun setFrictionDurationMinutes(site: String, actionWireType: String, minutes: Int) {
-        prefs.edit().putInt(frictionDurationKey(site, actionWireType), minutes).apply()
+    // --- internals ------------------------------------------------------------
+
+    private fun commitSettings(updated: Map<String, SiteSettings>) {
+        currentSettings = updated
+        persistSettings(updated)
+        _settings.value = updated
+        pushSettingsSnapshot()
     }
 
-    private fun frictionDurationKey(site: String, actionWireType: String) =
-        "friction_duration:$site:$actionWireType"
+    private fun runOnMain(block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) block() else mainHandler.post { block() }
+    }
 
-    // --- internals --------------------------------------------------------
+    private fun postToExtension(message: JSONObject) {
+        val currentPort = port ?: return
+        try {
+            currentPort.postMessage(message)
+        } catch (e: RuntimeException) {
+            // The next onConnect() pushes a fresh snapshot, so this only delays the change.
+            Log.w(LOG_TAG, "Failed to post ${message.optString("type")} to the extension", e)
+        }
+    }
 
     private fun pushSettingsSnapshot() {
-        val currentPort = port ?: return
-        val snapshot = JSONObject()
-        for ((site, siteSettings) in _settings.value.orEmpty()) {
-            snapshot.put(site, siteSettingsToJson(siteSettings))
+        val sites = JSONObject()
+        for ((site, siteSettings) in currentSettings) {
+            sites.put(site, siteSettings.toWireJson())
         }
-        val envelope = JSONObject()
-        envelope.put("type", "feed-limiter:settings-snapshot")
-        envelope.put("settings", snapshot)
-        try {
-            currentPort.postMessage(envelope)
-        } catch (e: Exception) {
-            // Port likely disconnected between the null-check above and
-            // this call (e.g. background page just got suspended) - safe
-            // no-op. onDisconnect() will clear `port`, and the next
-            // onConnect() naturally sends a fresh snapshot, so nothing is
-            // permanently lost, only delayed.
-        }
+        postToExtension(
+            JSONObject()
+                .put("type", MSG_SETTINGS_SNAPSHOT)
+                .put("settings", sites)
+                .put("lowSaturation", currentLowSaturation.wireValue),
+        )
+    }
+
+    private fun pushPictureInPicture() {
+        postToExtension(JSONObject().put("type", MSG_PIP).put("active", pictureInPicture))
     }
 
     private fun handleCountsUpdate(json: JSONObject) {
-        val site = json.optString("site").takeIf { it in BUILT_IN_SITES } ?: return
-        val entry = json.optJSONObject("entry") ?: return
-        val usage = SiteUsage(
-            postsSeen = entry.optInt("postsSeen", 0),
-            minutesUsed = entry.optInt("minutesUsed", 0),
-            blocked = entry.optBoolean("blocked", false)
-        )
-        val current = _liveUsage.value.orEmpty().toMutableMap()
-        current[site] = usage
-        _liveUsage.postValue(current)
-    }
-
-    private fun siteSettingsToJson(settings: BuiltInSiteSettings): JSONObject {
-        val siteJson = JSONObject()
-        siteJson.put("enabled", settings.enabled)
-        siteJson.put("mode", settings.mode.wireValue)
-        siteJson.put("postLimit", settings.postLimit)
-        // JSONObject has no implicit "null" for a missing Int? - put
-        // JSONObject.NULL explicitly so config.js's `!== undefined` override
-        // check still sees a real (null) value instead of the key being
-        // absent from the JSON entirely, which `!== undefined` would also
-        // treat as "no override" but for the wrong reason.
-        siteJson.put("timerMinutesLimit", settings.timerMinutesLimit ?: JSONObject.NULL)
-        return siteJson
-    }
-
-    private fun loadSettings(): Map<String, BuiltInSiteSettings> {
-        val raw = prefs.getString(PREFS_KEY, null) ?: return DEFAULT_BUILT_IN_SETTINGS
-        return try {
-            val json = JSONObject(raw)
-            BUILT_IN_SITES.associateWith { site ->
-                val siteJson = json.optJSONObject(site)
-                    ?: return@associateWith DEFAULT_BUILT_IN_SETTINGS.getValue(site)
-                BuiltInSiteSettings(
-                    enabled = siteJson.optBoolean("enabled", true),
-                    mode = FeedLimiterMode.fromWireValue(siteJson.optString("mode")),
-                    postLimit = siteJson.optInt("postLimit", DEFAULT_BUILT_IN_SETTINGS.getValue(site).postLimit),
-                    timerMinutesLimit = if (siteJson.isNull("timerMinutesLimit")) {
-                        null
-                    } else {
-                        siteJson.optInt("timerMinutesLimit")
-                    }
-                )
-            }
-        } catch (e: Exception) {
-            // Corrupt/unreadable prefs (shouldn't happen since this class is
-            // the only writer) - fall back to Phase 1 defaults rather than
-            // crashing the Settings screen on launch.
-            DEFAULT_BUILT_IN_SETTINGS
+        val site = json.opt("site") as? String
+        val entry = json.optJSONObject("entry")
+        if (site == null || entry == null) {
+            Log.w(LOG_TAG, "Ignoring malformed counts-update: $json")
+            return
         }
+        // Counts for a site that was just removed are expected and harmless.
+        if (site !in currentSettings) return
+        val usage = try {
+            SiteUsage(
+                postsSeen = entry.requireCount("postsSeen"),
+                minutesUsed = entry.requireCount("minutesUsed"),
+                blocked = entry.get("blocked") as? Boolean ?: throw JSONException("blocked is not a boolean"),
+                videosWatched = entry.requireCount("videosWatched"),
+            )
+        } catch (e: JSONException) {
+            Log.w(LOG_TAG, "Ignoring counts-update for $site: ${e.message}")
+            return
+        }
+        currentUsage = currentUsage + (site to usage)
+        _liveUsage.value = currentUsage
     }
 
-    private fun persistSettings(settingsMap: Map<String, BuiltInSiteSettings>) {
+    private fun SiteSettings.toWireJson(): JSONObject {
+        val json = JSONObject()
+            .put("type", type.wireValue)
+            .put("enabled", enabled)
+            .put("mode", mode.wireValue)
+            // JSONObject.NULL, because put(name, null) removes the key instead.
+            .put("postLimit", postLimit ?: JSONObject.NULL)
+            .put("timerMinutesLimit", timerMinutesLimit ?: JSONObject.NULL)
+            .put("desaturate", desaturate)
+        if (type == SiteType.YOUTUBE_REGULAR) json.put("videoLimit", videoLimit ?: JSONObject.NULL)
+        return json
+    }
+
+    private fun SiteSettings.toPersistedJson(): JSONObject {
+        val countdowns = JSONObject()
+        for ((cap, minutes) in countdownMinutes) countdowns.put(cap.wireValue, minutes)
+        return toWireJson().put("countdownMinutes", countdowns)
+    }
+
+    private fun persistSettings(settingsMap: Map<String, SiteSettings>) {
         val json = JSONObject()
         for ((site, siteSettings) in settingsMap) {
-            json.put(site, siteSettingsToJson(siteSettings))
+            json.put(site, siteSettings.toPersistedJson())
         }
-        prefs.edit().putString(PREFS_KEY, json.toString()).apply()
+        prefs.edit().putString(PREFS_KEY_SETTINGS, json.toString()).apply()
+    }
+
+    /**
+     * Fixed sites always exist (defaults fill any gap); custom sites exist only
+     * if stored. Also reads the pre-custom-sites format, which had no `type`,
+     * `videoLimit`, `desaturate` or `countdownMinutes` fields.
+     */
+    private fun loadSettings(): Map<String, SiteSettings> {
+        val result = DEFAULT_SETTINGS.toMutableMap()
+        val raw = prefs.getString(PREFS_KEY_SETTINGS, null) ?: return result
+        val json = try {
+            JSONObject(raw)
+        } catch (e: JSONException) {
+            Log.e(LOG_TAG, "Stored settings are not valid JSON; using defaults", e)
+            return result
+        }
+        for (site in json.keys()) {
+            val parsed = try {
+                parseStoredSite(site, json.getJSONObject(site))
+            } catch (e: JSONException) {
+                Log.w(LOG_TAG, "Ignoring stored settings for $site: ${e.message}")
+                continue
+            }
+            val error = validationError(site, parsed)
+            if (error != null) {
+                Log.w(LOG_TAG, "Ignoring stored settings for $site: $error")
+                continue
+            }
+            result[site] = parsed
+        }
+        return result
+    }
+
+    private fun parseStoredSite(site: String, json: JSONObject): SiteSettings {
+        val type = if (json.has("type")) {
+            SiteType.fromWireValue(json.getString("type")) ?: throw JSONException("unknown type ${json.get("type")}")
+        } else {
+            expectedTypeFor(site)
+        }
+        val defaults = DEFAULT_SETTINGS[site]
+        val countdowns = mutableMapOf<CapType, Int>()
+        json.optJSONObject("countdownMinutes")?.let { stored ->
+            for (key in stored.keys()) {
+                val cap = CapType.fromWireValue(key) ?: throw JSONException("unknown countdown cap $key")
+                countdowns[cap] = stored.requireInt(key)
+            }
+        }
+        return SiteSettings(
+            type = type,
+            enabled = json.get("enabled") as? Boolean ?: throw JSONException("enabled is not a boolean"),
+            mode = FeedLimiterMode.fromWireValue(json.getString("mode"))
+                ?: throw JSONException("unknown mode ${json.get("mode")}"),
+            postLimit = json.optionalInt("postLimit"),
+            timerMinutesLimit = json.optionalInt("timerMinutesLimit"),
+            videoLimit = if (json.has("videoLimit")) json.optionalInt("videoLimit") else defaults?.videoLimit,
+            desaturate = if (json.has("desaturate")) {
+                json.get("desaturate") as? Boolean ?: throw JSONException("desaturate is not a boolean")
+            } else {
+                false
+            },
+            countdownMinutes = countdowns,
+        )
+    }
+
+    private fun loadLowSaturation(): LowSaturationMode {
+        val raw = prefs.getString(PREFS_KEY_LOW_SATURATION, null) ?: return LowSaturationMode.OFF
+        return LowSaturationMode.fromWireValue(raw) ?: LowSaturationMode.OFF.also {
+            Log.w(LOG_TAG, "Unknown stored low-saturation mode '$raw'; using off")
+        }
     }
 
     companion object {
         private const val PREFS_NAME = "feed_limiter_settings"
-        private const val PREFS_KEY = "built_in_site_settings_json"
-        const val DEFAULT_FRICTION_DURATION_MINUTES = 15
+
+        // Name kept from the built-in-only version so upgrades keep existing settings.
+        private const val PREFS_KEY_SETTINGS = "built_in_site_settings_json"
+        private const val PREFS_KEY_LOW_SATURATION = "low_saturation_mode"
+
+        private const val MSG_REQUEST_SETTINGS = "feed-limiter:request-settings"
+        private const val MSG_COUNTS_UPDATE = "feed-limiter:counts-update"
+        private const val MSG_SETTINGS_SNAPSHOT = "feed-limiter:settings-snapshot"
+        private const val MSG_PIP = "feed-limiter:pip"
     }
 }
+
+private fun JSONObject.requireInt(name: String): Int {
+    val value = get(name)
+    if (value !is Number || value.toDouble() != value.toInt().toDouble()) {
+        throw JSONException("$name is not an integer: $value")
+    }
+    return value.toInt()
+}
+
+private fun JSONObject.requireCount(name: String): Int =
+    requireInt(name).also { if (it < 0) throw JSONException("$name is negative: $it") }
+
+private fun JSONObject.optionalInt(name: String): Int? =
+    if (!has(name) || isNull(name)) null else requireInt(name)

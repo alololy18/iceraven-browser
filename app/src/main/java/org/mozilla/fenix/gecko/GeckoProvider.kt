@@ -97,10 +97,9 @@ object GeckoProvider {
                 }
             )
 
-        // Feed Limiter (personal build): install the bundled WebExtension as a
-        // built-in extension so no sideloading is needed on-device. Idempotent -
-        // safe to call every time this runtime is created, and createRuntime()
-        // itself only ever runs once per process thanks to getOrCreateRuntime().
+        // Feed Limiter (personal build): bundled as a built-in extension so it
+        // can't be removed from the add-ons screen. ensureBuiltIn() reinstalls only
+        // when the manifest version changes, so bump it with every extension change.
         geckoRuntime.webExtensionController
             .ensureBuiltIn(
                 "resource://android/assets/extensions/feed-limiter/",
@@ -113,13 +112,14 @@ object GeckoProvider {
                         "Built-in extension ready: ${extension?.id}",
                     )
                     if (extension != null) {
-                        // Creates the native-side bridge singleton and wires it as the
-                        // message delegate for this extension's native-messaging port.
-                        // "feedlimiter" MUST exactly match the nativeApp string
-                        // background.js passes to browser.runtime.connectNative(...).
+                        // "feedlimiter" must match browser.runtime.connectNative() in background.js.
                         val feedLimiterBridge = FeedLimiterExtensionBridge(context)
                         FeedLimiterBridgeHolder.initialize(feedLimiterBridge)
                         extension.setMessageDelegate(feedLimiterBridge, "feedlimiter")
+                    } else {
+                        FeedLimiterBridgeHolder.recordInstallFailure(
+                            IllegalStateException("ensureBuiltIn() completed without an extension"),
+                        )
                     }
                 },
                 { throwable ->
@@ -128,6 +128,7 @@ object GeckoProvider {
                         "Failed to install built-in extension",
                         throwable,
                     )
+                    FeedLimiterBridgeHolder.recordInstallFailure(throwable)
                 },
             )
 

@@ -107,11 +107,6 @@
             android:title="@string/preferences_ai_controls" />
 
         <androidx.preference.Preference
-            android:key="@string/pref_key_feed_limiter"
-            app:iconSpaceReserved="false"
-            android:title="@string/preferences_feed_limiter" />
-
-        <androidx.preference.Preference
             android:key="@string/pref_key_import_bookmarks"
             app:iconSpaceReserved="false"
             app:isPreferenceVisible="false"

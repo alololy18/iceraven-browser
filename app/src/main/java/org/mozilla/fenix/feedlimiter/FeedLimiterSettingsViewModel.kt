@@ -1,61 +1,62 @@
 package org.mozilla.fenix.feedlimiter
 
-// PLACEHOLDER PACKAGE - see the comment at the top of
-// FeedLimiterExtensionBridge.kt.
-
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MediatorLiveData
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 
 /**
- * Backs FeedLimiterSettingsFragment. Pure presentation logic: combines the
- * bridge's settings + live-usage LiveData into one row-per-site list for
- * the RecyclerView adapter, and applies non-friction changes immediately.
- * Friction-gated (loosening) changes are NOT applied here - the Fragment
- * routes those to the confirm/cooldown screen instead, which calls
- * FeedLimiterExtensionBridge.updateSiteSettings() directly once its
- * countdown completes (see FeedLimiterConfirmViewModel).
+ * Combines the bridge's settings, usage and low-saturation mode into one row
+ * per site. Countdown-gated changes never go through here; the Fragment sends
+ * those to the confirm screen.
  */
 class FeedLimiterSettingsViewModel(
-    private val bridge: FeedLimiterExtensionBridge
+    private val bridge: FeedLimiterExtensionBridge,
 ) : ViewModel() {
 
     data class SiteRow(
         val site: String,
         val displayName: String,
-        val settings: BuiltInSiteSettings,
-        val usage: SiteUsage
+        val settings: SiteSettings,
+        val usage: SiteUsage,
+        val showDesaturate: Boolean,
     )
 
     private val _rows = MediatorLiveData<List<SiteRow>>()
     val rows: LiveData<List<SiteRow>> get() = _rows
 
+    val lowSaturation: LiveData<LowSaturationMode> get() = bridge.lowSaturation
+
     init {
         _rows.addSource(bridge.settings) { recompute() }
         _rows.addSource(bridge.liveUsage) { recompute() }
+        _rows.addSource(bridge.lowSaturation) { recompute() }
     }
 
     private fun recompute() {
         val settingsMap = bridge.settings.value.orEmpty()
         val usageMap = bridge.liveUsage.value.orEmpty()
-        _rows.value = BUILT_IN_SITES.map { site ->
+        val showDesaturate = bridge.lowSaturation.value == LowSaturationMode.SELECTED
+        val customSites = settingsMap.filterValues { it.type == SiteType.CUSTOM }.keys.sorted()
+        _rows.value = (BUILT_IN_SITES + YOUTUBE_SITE + customSites).mapNotNull { site ->
+            val siteSettings = settingsMap[site] ?: return@mapNotNull null
             SiteRow(
                 site = site,
                 displayName = displayNameFor(site),
-                settings = settingsMap[site] ?: DEFAULT_BUILT_IN_SETTINGS.getValue(site),
-                usage = usageMap[site] ?: SiteUsage()
+                settings = siteSettings,
+                usage = usageMap[site] ?: SiteUsage(),
+                showDesaturate = showDesaturate,
             )
         }
     }
 
-    /** For tightening changes only (lower a limit, enable a cap, switch to
-     *  a stricter mode) - applies with no friction. The Fragment is
-     *  responsible for never calling this for a loosening change; see
-     *  FeedLimiterSettingsFragment.isLoosening(). */
-    fun applyImmediately(site: String, newSettings: BuiltInSiteSettings) {
+    fun applyImmediately(site: String, newSettings: SiteSettings): Boolean =
         bridge.updateSiteSettings(site, newSettings)
-    }
+
+    fun addCustomSite(input: String, timerMinutesLimit: Int): DomainResult =
+        bridge.addCustomSite(input, timerMinutesLimit)
+
+    fun setLowSaturationMode(mode: LowSaturationMode) = bridge.setLowSaturationMode(mode)
 
     class Factory(private val bridge: FeedLimiterExtensionBridge) : ViewModelProvider.Factory {
         override fun <T : ViewModel> create(modelClass: Class<T>): T {

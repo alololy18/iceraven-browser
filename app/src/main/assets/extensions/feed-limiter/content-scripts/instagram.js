@@ -1,13 +1,5 @@
-// Phase 1 adapter for Instagram - counts newly inserted feed post nodes
-// via MutationObserver and reports them to the background script.
-//
-// SELECTOR CAVEAT: Instagram's DOM is unstable and undocumented. "main
-// article" is a reasonable starting guess (Instagram wraps each feed
-// post in an <article> inside the main content region) but has NOT been
-// verified against the live site. Before trusting the counts: open the
-// page, open devtools, scroll a few posts, and confirm this selector
-// matches exactly one node per post - not per image, not per comment,
-// not matching zero because the markup changed.
+// Instagram adapter: counts feed posts as they are inserted.
+// "main article" is unverified against the live site.
 const SITE = "instagram.com";
 const POST_SELECTOR = "main article";
 
@@ -32,47 +24,22 @@ function countNewPosts(addedNodes) {
 
 function reportPosts(count) {
   if (count <= 0) return;
-  browser.runtime.sendMessage({ type: "feed-limiter:posts-seen", site: SITE, count });
+  browser.runtime
+    .sendMessage({ type: "feed-limiter:posts-seen", site: SITE, count })
+    .catch((e) => console.error("[feed-limiter] posts-seen report failed", SITE, e));
 }
 
-// FIX (first-load-counter-not-updating-while-scrolling bug):
-// Root cause: `start()` captured `document.querySelector("main") || document.body`
-// ONCE into a local `root` variable and bound the MutationObserver to that exact
-// node reference for the rest of the page's lifetime. On a first/cold load,
-// Instagram's React app typically renders an initial skeleton/loading shell
-// first and then replaces large chunks of the DOM - including, potentially,
-// the very `<main>` node itself - once the real feed hydrates. If that
-// swap replaces the observed node rather than mutating its children in place,
-// the MutationObserver keeps watching a now-detached, dead subtree: it never
-// fires again, and `countNewPosts` is never re-run, so the counter looks frozen
-// even though real feed activity is happening live.
-//
-// On a second/warm visit (cached JS bundles, cached API responses, warm
-// browser/render caches), hydration finishes fast enough that the node
-// present at the time `start()` runs is already the final, stable `<main>`
-// element - so the observer stays correctly bound and scrolling increments
-// the counter as expected. This matches the reported symptom exactly:
-// works after a refresh/second visit, not on first load.
-//
-// FIX: make the observer self-healing. Instead of trusting `root` forever,
-// periodically check whether the live DOM still has the same node mounted
-// (`root.isConnected` and still the same reference returned by a fresh
-// querySelector). If it has changed or detached, disconnect the old
-// observer, rebind to the new live node, and do a fresh full scan of it
-// (deduped by the same `seenPosts` WeakSet, so this is safe/idempotent).
+// On a cold load Instagram can replace <main> itself while hydrating, which
+// leaves an observer bound to the old node watching a detached subtree. The
+// root is therefore re-checked periodically and the observer rebound; the
+// WeakSet keeps rescans idempotent.
 let root = null;
-let badge = null;
 
 const observer = new MutationObserver((mutations) => {
   let total = 0;
   for (const m of mutations) total += countNewPosts(m.addedNodes);
-  reportPostsAndRefreshBadge(total);
+  reportPosts(total);
 });
-
-function reportPostsAndRefreshBadge(count) {
-  reportPosts(count);
-  if (badge) feedLimiterRefreshBadge(badge, SITE);
-}
 
 function currentLiveRoot() {
   return document.querySelector("main") || document.body;
@@ -84,59 +51,26 @@ function bindObserverTo(node) {
   observer.observe(root, { childList: true, subtree: true });
 }
 
-// Full re-scan safety net, also used whenever we (re)bind to a node, so
-// posts already present on the new/current root get counted even if no
-// further mutation ever fires for them.
-function rescanRoot() {
-  reportPostsAndRefreshBadge(countNewPosts([root]));
-}
-
-// Periodically verify the observed root is still the live one. This is the
-// core of the fix: on first load, if Instagram swaps out <main> during
-// hydration, this check notices the stale/detached node and rebinds to
-// the fresh one - instead of silently watching a dead subtree forever.
+// Rescans even when the root is unchanged, in case rows were recycled in
+// place rather than inserted.
 function healObserverIfRootChanged() {
   const live = currentLiveRoot();
-  if (live !== root || !root.isConnected) {
-    bindObserverTo(live);
-    rescanRoot();
-  } else {
-    // Root is still correct; still worth a defensive full re-scan in case
-    // Instagram virtualized/recycled rows without inserting new nodes
-    // (existing node reused/repositioned rather than a true DOM insert).
-    rescanRoot();
-  }
+  if (live !== root || !root.isConnected) bindObserverTo(live);
+  reportPosts(countNewPosts([root]));
 }
 
 function start() {
   bindObserverTo(currentLiveRoot());
-  // Guarded rather than called directly: this zip's badge.js baseline does
-  // not define feedLimiterSetupVisibilityReporting at all (see findings
-  // below), and an optional-chained call on an undeclared identifier still
-  // throws a ReferenceError - only a typeof check is safe here.
-  if (typeof feedLimiterSetupVisibilityReporting === "function") {
-    feedLimiterSetupVisibilityReporting(SITE);
-  }
-  badge = feedLimiterCreateBadge();
-  feedLimiterRefreshBadge(badge, SITE);
+  reportPosts(countNewPosts([root]));
 
-  // Count whatever's already rendered on load, not just future insertions.
-  reportPostsAndRefreshBadge(countNewPosts([root]));
-
-  // Tight polling for the first stretch after load, when hydration-driven
-  // root swaps are most likely to happen, then fall back to the steady
-  // 10s cadence used for badge/timer refresh generally.
+  // Fast checks while hydration swaps are likely, then a slow steady check.
   let healChecks = 0;
   const fastHeal = setInterval(() => {
     healObserverIfRootChanged();
     healChecks++;
-    if (healChecks >= 10) clearInterval(fastHeal); // ~10s of fast checks at 1s each
+    if (healChecks >= 10) clearInterval(fastHeal);
   }, 1000);
-
-  setInterval(() => {
-    feedLimiterRefreshBadge(badge, SITE);
-    healObserverIfRootChanged();
-  }, 10000);
+  setInterval(healObserverIfRootChanged, 10000);
 }
 
 if (document.readyState === "complete" || document.readyState === "interactive") {

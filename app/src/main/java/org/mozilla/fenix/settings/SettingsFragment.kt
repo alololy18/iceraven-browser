@@ -436,10 +436,6 @@ class SettingsFragment : PreferenceFragmentCompat(), SystemInsetsPaddedFragment 
                     SettingsFragmentDirections.actionSettingsFragmentToAiControlsFragment()
                 }
 
-                resources.getString(R.string.pref_key_feed_limiter) -> {
-                    SettingsFragmentDirections.actionSettingsFragmentToFeedLimiterSettingsFragment()
-                }
-
                 // Privacy and security preferences
                 resources.getString(R.string.pref_key_private_browsing) -> {
                     SettingsFragmentDirections.actionSettingsFragmentToPrivateBrowsingFragment()

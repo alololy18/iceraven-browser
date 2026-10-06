@@ -1,12 +1,6 @@
-// Phase 1 adapter for X/Twitter - counts newly inserted tweet nodes via
-// MutationObserver and reports them to the background script.
-//
-// SELECTOR NOTE: article[data-testid="tweet"] has been a stable,
-// widely-documented selector for an individual tweet in the feed for a
-// long time, so this is more likely to hold up than the Instagram guess
-// - but it is still worth a quick live check (devtools, scroll a few
-// tweets) before trusting the counts, since X has changed data-testid
-// values before without notice.
+// X/Twitter adapter: counts tweets as they are inserted.
+// data-testid="tweet" has been stable for a long time but X has changed
+// data-testid values before without notice.
 const SITE = "x.com";
 const POST_SELECTOR = 'article[data-testid="tweet"]';
 
@@ -31,31 +25,21 @@ function countNewPosts(addedNodes) {
 
 function reportPosts(count) {
   if (count <= 0) return;
-  browser.runtime.sendMessage({ type: "feed-limiter:posts-seen", site: SITE, count });
+  browser.runtime
+    .sendMessage({ type: "feed-limiter:posts-seen", site: SITE, count })
+    .catch((e) => console.error("[feed-limiter] posts-seen report failed", SITE, e));
 }
 
 const observer = new MutationObserver((mutations) => {
   let total = 0;
   for (const m of mutations) total += countNewPosts(m.addedNodes);
-  reportPostsAndRefreshBadge(total);
+  reportPosts(total);
 });
-
-let badge = null;
-
-function reportPostsAndRefreshBadge(count) {
-  reportPosts(count);
-  if (badge) feedLimiterRefreshBadge(badge, SITE);
-}
 
 function start() {
   const root = document.querySelector('[data-testid="primaryColumn"]') || document.body;
-  feedLimiterSetupVisibilityReporting(SITE);
-  badge = feedLimiterCreateBadge();
-  feedLimiterRefreshBadge(badge, SITE);
-  setInterval(() => feedLimiterRefreshBadge(badge, SITE), 10000);
-
   observer.observe(root, { childList: true, subtree: true });
-  reportPostsAndRefreshBadge(countNewPosts([root]));
+  reportPosts(countNewPosts([root]));
 }
 
 if (document.readyState === "complete" || document.readyState === "interactive") {

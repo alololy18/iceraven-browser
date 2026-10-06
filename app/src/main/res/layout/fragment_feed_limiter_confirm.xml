@@ -1,67 +1,81 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- PLACEHOLDER - plain generic layout, not matched to fork styling. -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:gravity="center"
-    android:padding="32dp">
+    android:layout_height="match_parent">
 
     <TextView
-        android:id="@+id/tvConfirmDescription"
+        android:id="@+id/tvConfirmUnavailable"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:gravity="center"
-        android:textSize="18sp"
-        android:textStyle="bold"
-        tools:text="You're about to raise the post cap on Instagram to 35" />
-
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="12dp"
-        android:gravity="center"
-        android:alpha="0.7"
-        android:text="Stay on this screen until the countdown finishes. Leaving - even briefly - resets it to the start." />
-
-    <TextView
-        android:id="@+id/tvCountdown"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="32dp"
-        android:textSize="48sp"
-        android:textStyle="bold"
-        tools:text="15:00" />
-
-    <ProgressBar
-        android:id="@+id/progressCountdown"
-        style="?android:attr/progressBarStyleHorizontal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:max="1000" />
+        android:padding="24dp"
+        android:textSize="16sp"
+        android:visibility="gone"
+        tools:text="@string/feed_limiter_unavailable" />
 
     <LinearLayout
+        android:id="@+id/confirmContent"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="32dp"
-        android:orientation="horizontal">
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:padding="32dp">
 
-        <Button
-            android:id="@+id/btnConfirmCancel"
-            android:layout_width="0dp"
+        <TextView
+            android:id="@+id/tvConfirmDescription"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Cancel" />
+            android:gravity="center"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            tools:text="You're about to raise the post cap on Instagram to 35." />
 
-        <Button
-            android:id="@+id/btnConfirmApply"
-            android:layout_width="0dp"
+        <TextView
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginStart="16dp"
-            android:enabled="false"
-            tools:text="Confirm" />
+            android:layout_marginTop="12dp"
+            android:alpha="0.7"
+            android:gravity="center"
+            android:text="@string/feed_limiter_confirm_instructions" />
+
+        <TextView
+            android:id="@+id/tvCountdown"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="32dp"
+            android:textSize="48sp"
+            android:textStyle="bold"
+            tools:text="15:00" />
+
+        <ProgressBar
+            android:id="@+id/progressCountdown"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:max="1000" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="32dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnConfirmCancel"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/feed_limiter_cancel" />
+
+            <Button
+                android:id="@+id/btnConfirmApply"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="16dp"
+                android:layout_weight="1"
+                android:enabled="false"
+                android:text="@string/feed_limiter_confirm" />
+        </LinearLayout>
     </LinearLayout>
-</LinearLayout>
+</FrameLayout>

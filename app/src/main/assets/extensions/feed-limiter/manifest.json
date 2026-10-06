@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
-  "name": "Feed Limiter (Phase 1 dev build)",
-  "version": "0.3.0",
-  "description": "Core post-cap/timer-cap counting and blocking logic for Instagram, X, TikTok, Facebook, Reddit, LinkedIn, and YouTube Shorts. Phase 2: native settings UI + friction/cooldown gate, synced to the background script via native messaging.",
+  "name": "Feed Limiter",
+  "version": "0.4.0",
+  "description": "Caps posts and time on feed sites, regular YouTube and user-added sites, then blocks them until local midnight. Settings live in the browser's native Feed Limiter screen.",
   "permissions": [
     "storage",
     "tabs",
@@ -12,58 +12,63 @@
     "alarms",
     "nativeMessaging",
     "geckoViewAddons",
-    "*://*.instagram.com/*",
-    "*://*.x.com/*",
-    "*://*.twitter.com/*",
-    "*://*.tiktok.com/*",
-    "*://*.facebook.com/*",
-    "*://*.reddit.com/*",
-    "*://*.linkedin.com/*",
-    "*://*.youtube.com/*"
+    "<all_urls>"
   ],
   "background": {
     "scripts": ["config.js", "background.js"]
   },
   "content_scripts": [
     {
+      "matches": ["<all_urls>"],
+      "js": ["content-scripts/visibility.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    },
+    {
       "matches": ["*://*.instagram.com/*"],
-      "js": ["content-scripts/badge.js", "content-scripts/instagram.js"],
+      "js": ["content-scripts/instagram.js"],
       "run_at": "document_idle",
       "all_frames": false
     },
     {
       "matches": ["*://*.x.com/*", "*://*.twitter.com/*"],
-      "js": ["content-scripts/badge.js", "content-scripts/x.js"],
+      "js": ["content-scripts/x.js"],
       "run_at": "document_idle",
       "all_frames": false
     },
     {
       "matches": ["*://*.tiktok.com/*"],
-      "js": ["content-scripts/badge.js", "content-scripts/tiktok.js"],
+      "js": ["content-scripts/tiktok.js"],
       "run_at": "document_idle",
       "all_frames": false
     },
     {
       "matches": ["*://*.facebook.com/*"],
-      "js": ["content-scripts/badge.js", "content-scripts/facebook.js"],
+      "js": ["content-scripts/facebook.js"],
       "run_at": "document_idle",
       "all_frames": false
     },
     {
       "matches": ["*://*.reddit.com/*"],
-      "js": ["content-scripts/badge.js", "content-scripts/reddit.js"],
+      "js": ["content-scripts/reddit.js"],
       "run_at": "document_idle",
       "all_frames": false
     },
     {
       "matches": ["*://*.linkedin.com/*"],
-      "js": ["content-scripts/badge.js", "content-scripts/linkedin.js"],
+      "js": ["content-scripts/linkedin.js"],
       "run_at": "document_idle",
       "all_frames": false
     },
     {
       "matches": ["*://*.youtube.com/shorts/*"],
-      "js": ["content-scripts/badge.js", "content-scripts/youtube-shorts.js"],
+      "js": ["content-scripts/youtube-shorts.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    },
+    {
+      "matches": ["*://*.youtube.com/*"],
+      "js": ["content-scripts/youtube-watch.js"],
       "run_at": "document_idle",
       "all_frames": false
     }

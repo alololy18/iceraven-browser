@@ -351,6 +351,114 @@
     <!-- Feed Limiter settings -->
     <!-- Title for the Feed Limiter settings screen -->
     <string name="preferences_feed_limiter">Feed Limiter</string>
+    <!-- Shown on the Feed Limiter screens when the built-in extension hasn't finished starting (or failed to). -->
+    <string name="feed_limiter_unavailable">Feed Limiter is still starting — try again in a moment.</string>
+    <!-- Heading for the low-saturation setting on the Feed Limiter screen -->
+    <string name="feed_limiter_low_saturation_title">Low saturation</string>
+    <!-- Low-saturation choice: never desaturate -->
+    <string name="feed_limiter_low_saturation_off">Off</string>
+    <!-- Low-saturation choice: desaturate every website -->
+    <string name="feed_limiter_low_saturation_all">All sites</string>
+    <!-- Low-saturation choice: desaturate only the sites ticked below -->
+    <string name="feed_limiter_low_saturation_selected">Selected sites</string>
+    <!-- Explains the low-saturation setting -->
+    <string name="feed_limiter_low_saturation_summary">Shows pages at 10% colour. Applies to pages you open or reload after changing it.</string>
+    <!-- Button that opens the add-custom-site dialog -->
+    <string name="feed_limiter_add_site">Add site</string>
+    <!-- Title of the add-custom-site dialog -->
+    <string name="feed_limiter_add_site_title">Add a site</string>
+    <!-- Hint for the domain field in the add-custom-site dialog -->
+    <string name="feed_limiter_add_site_domain_hint">Domain, e.g. example.com</string>
+    <!-- Hint for the daily time limit field in the add-custom-site dialog -->
+    <string name="feed_limiter_add_site_minutes_hint">Daily time limit (minutes)</string>
+    <!-- Error for an out-of-range time limit. %1$d is the minimum, %2$d the maximum. -->
+    <string name="feed_limiter_add_site_minutes_error">Enter a number from %1$d to %2$d</string>
+    <!-- Confirm button of the add-custom-site dialog -->
+    <string name="feed_limiter_add_site_confirm">Add</string>
+    <!-- Cancel button on Feed Limiter dialogs and the confirm screen -->
+    <string name="feed_limiter_cancel">Cancel</string>
+    <!-- Error when the entered domain isn't a valid hostname -->
+    <string name="feed_limiter_domain_error_invalid">Enter a valid domain, like example.com</string>
+    <!-- Error when the entered domain is YouTube -->
+    <string name="feed_limiter_domain_error_youtube">YouTube is already in the list. Use its row instead.</string>
+    <!-- Error when the entered domain is one of the built-in sites -->
+    <string name="feed_limiter_domain_error_built_in">This site is built in. Use its row instead.</string>
+    <!-- Error when the entered domain was already added -->
+    <string name="feed_limiter_domain_error_duplicate">This site is already in the list.</string>
+    <!-- Error when the entered domain is a subdomain of a custom site already in the list. %1$s is that site. -->
+    <string name="feed_limiter_domain_error_covered">Already covered by %1$s. Change that site’s row instead.</string>
+    <!-- Name of the post cap -->
+    <string name="feed_limiter_cap_post">Post cap</string>
+    <!-- Name of the timer cap -->
+    <string name="feed_limiter_cap_timer">Timer cap</string>
+    <!-- Name of the daily video cap on YouTube -->
+    <string name="feed_limiter_cap_video">Video cap</string>
+    <!-- Label of the timer cap row -->
+    <string name="feed_limiter_timer_cap_label">Timer cap (min)</string>
+    <!-- Label of the YouTube daily video cap row -->
+    <string name="feed_limiter_video_cap_label">Videos per day</string>
+    <!-- Stepper button that lowers a limit -->
+    <string name="feed_limiter_step_down" translatable="false">–</string>
+    <!-- Stepper button that raises a limit -->
+    <string name="feed_limiter_step_up" translatable="false">+</string>
+    <!-- Shown in place of a limit that isn't set -->
+    <string name="feed_limiter_no_value" translatable="false">–</string>
+    <!-- Button showing a cap's countdown length. %1$s is the cap name, %2$d minutes. -->
+    <string name="feed_limiter_countdown_button">%1$s countdown: %2$d min</string>
+    <!-- Title of the countdown-length picker. %1$s is the cap name. -->
+    <string name="feed_limiter_countdown_dialog_title">%1$s countdown</string>
+    <!-- One countdown-length option. %1$d is minutes. -->
+    <string name="feed_limiter_countdown_option">%1$d min</string>
+    <!-- Checkbox that includes a site in "Selected sites" low saturation -->
+    <string name="feed_limiter_desaturate_site">Low saturation on this site</string>
+    <!-- Button that removes a custom site (after the countdown) -->
+    <string name="feed_limiter_remove_site">Remove site</string>
+    <!-- Usage line for a site that is turned off -->
+    <string name="feed_limiter_usage_off">Off</string>
+    <!-- Usage: %1$d posts seen today of a %2$d post cap -->
+    <string name="feed_limiter_usage_posts">%1$d of %2$d posts</string>
+    <!-- Usage: %1$d minutes used today of a %2$d minute cap -->
+    <string name="feed_limiter_usage_minutes">%1$d of %2$d min</string>
+    <!-- Usage: %1$d videos fully watched today of a %2$d video cap -->
+    <string name="feed_limiter_usage_videos_capped">%1$d of %2$d videos watched today</string>
+    <!-- Usage: %1$d videos fully watched today, no video cap -->
+    <string name="feed_limiter_usage_videos">%1$d videos watched today</string>
+    <!-- Usage suffix when the site is blocked until midnight -->
+    <string name="feed_limiter_usage_blocked">blocked for today</string>
+    <!-- Usage line when the site is on but no cap is active -->
+    <string name="feed_limiter_usage_no_cap">No cap active</string>
+    <!-- Separator between usage parts -->
+    <string name="feed_limiter_usage_separator" translatable="false">" · "</string>
+    <!-- Confirm-screen headline. %1$s is one of the feed_limiter_action_* phrases. -->
+    <string name="feed_limiter_confirm_description">You’re about to %1$s.</string>
+    <!-- Confirm-screen instructions -->
+    <string name="feed_limiter_confirm_instructions">Stay on this screen until the countdown finishes. Leaving, even briefly, resets it to the start.</string>
+    <!-- Confirm-screen button, enabled once the countdown finishes -->
+    <string name="feed_limiter_confirm">Confirm</string>
+    <!-- Shown if the confirm screen opens for a site that has since been removed -->
+    <string name="feed_limiter_confirm_site_missing">This site is no longer in Feed Limiter.</string>
+    <!-- Action phrase. %1$s is the site name. -->
+    <string name="feed_limiter_action_disable_post_cap">disable the post cap on %1$s</string>
+    <!-- Action phrase. %1$s is the site name. -->
+    <string name="feed_limiter_action_disable_timer_cap">disable the timer cap on %1$s</string>
+    <!-- Action phrase. %1$s is the site name. -->
+    <string name="feed_limiter_action_disable_video_cap">turn off the daily video cap on %1$s</string>
+    <!-- Action phrase. %1$s is the site name, %2$d the new post cap. -->
+    <string name="feed_limiter_action_raise_post_limit">raise the post cap on %1$s to %2$d</string>
+    <!-- Action phrase. %1$s is the site name, %2$d the new limit in minutes. -->
+    <string name="feed_limiter_action_raise_timer_limit">raise the timer cap on %1$s to %2$d minutes</string>
+    <!-- Action phrase. %1$s is the site name, %2$d the new daily video cap. -->
+    <string name="feed_limiter_action_raise_video_limit">raise the video cap on %1$s to %2$d a day</string>
+    <!-- Action phrase. %1$s is the site name. -->
+    <string name="feed_limiter_action_disable_site">turn off Feed Limiter entirely for %1$s</string>
+    <!-- Action phrase. %1$s is the site name. -->
+    <string name="feed_limiter_action_remove_site">remove %1$s from Feed Limiter</string>
+    <!-- Action phrase. %1$s is the site name, %2$d the new countdown in minutes. -->
+    <string name="feed_limiter_action_shorten_post_countdown">shorten the post-cap countdown on %1$s to %2$d minutes</string>
+    <!-- Action phrase. %1$s is the site name, %2$d the new countdown in minutes. -->
+    <string name="feed_limiter_action_shorten_timer_countdown">shorten the timer-cap countdown on %1$s to %2$d minutes</string>
+    <!-- Action phrase. %1$s is the site name, %2$d the new countdown in minutes. -->
+    <string name="feed_limiter_action_shorten_video_countdown">shorten the video-cap countdown on %1$s to %2$d minutes</string>
     <!-- Headline text for the AI controls banner. %s is the name of the app (for example "Firefox"). -->
     <string name="ai_controls_banner_headline">You always have a choice in %s</string>
     <!-- Supporting text for the AI controls banner. %s is a learn more link using ai_controls_learn_more as text. -->

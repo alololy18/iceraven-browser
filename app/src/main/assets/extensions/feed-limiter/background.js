@@ -1,240 +1,306 @@
-// Phase 1 background logic: per-site/per-day post + timer counting, cap
-// checking, daily reset (free, via date-keyed storage), hard-block on
-// navigation back to a capped site, and a best-effort network-level
-// cutoff. No friction/cooldown gate here - that only applies to
-// *loosening* a cap from the Phase 2 settings screen, which doesn't
-// exist yet.
+// Enforcement: per-site, per-day counts, cap checks, blocking, the native
+// settings bridge, and the low-saturation stylesheet registration.
 
 const INTERSTITIAL_URL = browser.runtime.getURL("interstitial.html");
+const TICK_ALARM = "feed-limiter-tick";
+const SNAPSHOT_STORAGE_KEY = "settingsSnapshot";
+const MODES = ["post", "timer", "both"];
+const LOW_SATURATION_MODES = ["off", "all", "selected"];
+const MAX_LIMIT = 100000;
+const MAX_POSTS_PER_MESSAGE = 1000;
+const VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
+const HOSTNAME_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
+// Captured before any snapshot can replace the defaults: these keys can never
+// be removed, and each must keep its type.
+const FIXED_SITE_TYPES = Object.fromEntries(
+  Object.entries(FEED_LIMITER_CONFIG.sites).map(([key, cfg]) => [key, cfg.type])
+);
+
+// browser.windows doesn't exist on GeckoView, so this stays true there and
+// per-tab visibility reports are the real signal.
 let windowFocused = true;
+let pictureInPicture = false;
 
-// In-memory mirror of which sites are blocked today. The webRequest
-// listener further down must respond synchronously to block a request,
-// but the real source of truth (storage.local) is only readable async -
-// so this cache is updated inline wherever an entry flips to blocked,
-// and hydrated from storage once at startup (see hydrateBlockedCache).
+// The blocking webRequest listener must answer synchronously, so it reads
+// this mirror instead of storage. Only valid while blockedCacheDay is today.
 const blockedSitesCache = new Set();
+let blockedCacheDay = todayKey();
 
-// Per-tab visibility reports (document.visibilitychange, reported by
-// each adapter via feedLimiterSetupVisibilityReporting in badge.js).
-// windows.onFocusChanged's behavior in GeckoView's single-window Android
-// model isn't well documented, and Android's own process-priority model
-// can leave a "focused" window state stale when the whole app is
-// backgrounded - e.g. home button, app switcher, screen lock. Firefox for
-// Android is confirmed to fire visibilitychange reliably on exactly those
-// transitions (unlike most mobile browsers), so it's the primary signal in
-// currentForegroundSite() below; windowFocused is kept only as a fallback
-// for the brief window before a tab's first visibility report arrives.
-// Keyed by tabId, not globally, so the same site open in a second,
-// background tab never counts time just because the foreground tab
-// happens to match too.
 const tabVisibility = new Map();
 
-async function getCounts() {
-  const { counts } = await browser.storage.local.get("counts");
-  return counts || {};
+let saturationRegistration = null;
+let saturationSignature = JSON.stringify(null);
+let saturationQueue = Promise.resolve();
+let countsQueue = Promise.resolve();
+let nativePort = null;
+
+// Listeners must be registered synchronously, but they must not judge usage
+// against config.js defaults before the persisted snapshot has loaded.
+let ready = null;
+
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-async function saveCounts(counts) {
-  await browser.storage.local.set({ counts });
+function isLimit(value) {
+  return Number.isInteger(value) && value > 0 && value <= MAX_LIMIT;
 }
 
-async function getEntry(site) {
-  const counts = await getCounts();
-  const key = `${site}:${todayKey()}`;
-  return counts[key] || { postsSeen: 0, minutesUsed: 0, blocked: false };
+function isCount(value) {
+  return Number.isInteger(value) && value >= 0;
 }
 
-async function setEntry(site, entry) {
-  const counts = await getCounts();
-  const key = `${site}:${todayKey()}`;
-  counts[key] = entry;
-  await saveCounts(counts);
+// --- counts storage ----------------------------------------------------------
+
+function normalizeEntry(raw, key) {
+  const entry = { postsSeen: 0, minutesUsed: 0, blocked: false, watchedVideoIds: [] };
+  if (raw === undefined) return entry;
+  if (!isPlainObject(raw)) {
+    console.error("[feed-limiter] discarding malformed counts entry", key, raw);
+    return entry;
+  }
+  for (const field of ["postsSeen", "minutesUsed"]) {
+    if (isCount(raw[field])) entry[field] = raw[field];
+    else if (raw[field] !== undefined) console.error("[feed-limiter] bad counts field", key, field, raw[field]);
+  }
+  entry.blocked = raw.blocked === true;
+  if (Array.isArray(raw.watchedVideoIds)) {
+    entry.watchedVideoIds = raw.watchedVideoIds.filter((id) => typeof id === "string" && VIDEO_ID_RE.test(id));
+  } else if (raw.watchedVideoIds !== undefined) {
+    console.error("[feed-limiter] bad watchedVideoIds", key, raw.watchedVideoIds);
+  }
   return entry;
 }
 
-function checkCap(site, entry) {
-  const cfg = FEED_LIMITER_CONFIG.sites[site];
-  if (!cfg) return false;
-  const postCapped = cfg.postLimit != null && entry.postsSeen >= cfg.postLimit;
-  const timerCapped = cfg.timerMinutesLimit != null && entry.minutesUsed >= cfg.timerMinutesLimit;
-  if (cfg.mode === "post") return postCapped;
-  if (cfg.mode === "timer") return timerCapped;
-  return postCapped || timerCapped; // "both" -> whichever trips first
+async function readCounts() {
+  const stored = await browser.storage.local.get("counts");
+  if (stored.counts === undefined) return {};
+  if (isPlainObject(stored.counts)) return stored.counts;
+  console.error("[feed-limiter] stored counts are malformed; starting today from zero", stored.counts);
+  return {};
 }
 
-async function registerPostsSeen(site, count) {
-  const entry = await getEntry(site);
-  entry.postsSeen += count;
-  if (!entry.blocked && checkCap(site, entry)) {
-    entry.blocked = true;
-    blockedSitesCache.add(site);
-    console.log(`[feed-limiter] ${site} capped on posts (${entry.postsSeen})`);
-  }
-  await setEntry(site, entry);
+// Serialised because posts, timer ticks and snapshot re-evaluation all
+// read-modify-write the same `counts` object and would otherwise lose updates.
+function updateCounts(mutate) {
+  const run = countsQueue.then(async () => {
+    const counts = await readCounts();
+    const result = mutate(counts);
+    await browser.storage.local.set({ counts });
+    return result;
+  });
+  // Failures reach the caller through `run`; this only keeps the chain alive.
+  countsQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+function isCapped(cfg, entry) {
+  if (!cfg || !cfg.enabled) return false;
+  const postCapped = cfg.mode !== "timer" && cfg.postLimit != null && entry.postsSeen >= cfg.postLimit;
+  const timerCapped = cfg.mode !== "post" && cfg.timerMinutesLimit != null && entry.minutesUsed >= cfg.timerMinutesLimit;
+  const videoCapped = cfg.videoLimit != null && entry.watchedVideoIds.length >= cfg.videoLimit;
+  return postCapped || timerCapped || videoCapped;
+}
+
+// Returns true when the site has just become blocked.
+function refreshBlocked(site, entry) {
+  const wasBlocked = entry.blocked;
+  entry.blocked = isCapped(FEED_LIMITER_CONFIG.sites[site], entry);
+  if (entry.blocked) blockedSitesCache.add(site);
+  else blockedSitesCache.delete(site);
+  return entry.blocked && !wasBlocked;
+}
+
+// Redirects whenever the site is blocked, not only on the transition, so a
+// blocked page that slipped through (e.g. a restored tab) is caught on its
+// next post or minute.
+async function recordUsage(site, apply) {
+  const { entry, newlyBlocked } = await updateCounts((counts) => {
+    const key = `${site}:${todayKey()}`;
+    const entry = normalizeEntry(counts[key], key);
+    apply(entry);
+    const newlyBlocked = refreshBlocked(site, entry);
+    counts[key] = entry;
+    return { entry, newlyBlocked };
+  });
   sendCountsUpdate(site, entry);
-  return entry;
+  if (newlyBlocked) console.log(`[feed-limiter] ${site} capped`, entry);
+  if (entry.blocked) await redirectSiteTabsToInterstitial(site);
 }
 
-async function tickTimer(site) {
-  const entry = await getEntry(site);
-  entry.minutesUsed += 1;
-  if (!entry.blocked && checkCap(site, entry)) {
-    entry.blocked = true;
-    blockedSitesCache.add(site);
-    console.log(`[feed-limiter] ${site} capped on time (${entry.minutesUsed}m)`);
-    await redirectSiteTabsToInterstitial(site);
+// Recomputes today's blocked flag for every configured site against the
+// current limits, so a confirmed loosen unblocks and a tighten below today's
+// usage blocks immediately. Also rebuilds the cache when the day has changed.
+async function reevaluateAll() {
+  const today = todayKey();
+  const { entries, newlyBlocked } = await updateCounts((counts) => {
+    blockedSitesCache.clear();
+    blockedCacheDay = today;
+    const entries = {};
+    const newlyBlocked = [];
+    for (const site of Object.keys(FEED_LIMITER_CONFIG.sites)) {
+      const key = `${site}:${today}`;
+      const entry = normalizeEntry(counts[key], key);
+      if (refreshBlocked(site, entry)) newlyBlocked.push(site);
+      if (counts[key] !== undefined || entry.blocked) counts[key] = entry;
+      entries[site] = entry;
+    }
+    return { entries, newlyBlocked };
+  });
+  for (const [site, entry] of Object.entries(entries)) sendCountsUpdate(site, entry);
+  for (const site of newlyBlocked) await redirectSiteTabsToInterstitial(site);
+}
+
+// --- tabs --------------------------------------------------------------------
+
+function siteForUrl(rawUrl) {
+  if (typeof rawUrl !== "string" || !/^https?:/i.test(rawUrl)) return null;
+  try {
+    const url = new URL(rawUrl);
+    return matchSite(url.hostname, url.pathname);
+  } catch (e) {
+    console.error("[feed-limiter] unparseable URL", rawUrl, e);
+    return null;
   }
-  await setEntry(site, entry);
-  sendCountsUpdate(site, entry);
 }
 
-async function isBlocked(site) {
-  const entry = await getEntry(site);
-  return entry.blocked;
+function redirectTab(tabId) {
+  browser.tabs.update(tabId, { url: INTERSTITIAL_URL })
+    .catch((e) => console.error("[feed-limiter] redirect to interstitial failed", tabId, e));
 }
 
 async function redirectSiteTabsToInterstitial(site) {
   const tabs = await browser.tabs.query({});
   for (const tab of tabs) {
-    if (!tab.url) continue;
-    try {
-      const url = new URL(tab.url);
-      if (matchSite(url.hostname, url.pathname) === site) {
-        browser.tabs.update(tab.id, { url: INTERSTITIAL_URL });
-      }
-    } catch (e) {
-      // non-http(s) tab URL (about:, moz-extension:, etc.) - ignore
-    }
+    if (siteForUrl(tab.url) === site) redirectTab(tab.id);
   }
 }
 
-// --- messages from content scripts (post counts) ---
-browser.runtime.onMessage.addListener(async (msg, sender) => {
-  if (msg?.type === "feed-limiter:posts-seen") {
-    const site = msg.site;
-    if (!FEED_LIMITER_CONFIG.sites[site]) return;
-    const entry = await registerPostsSeen(site, msg.count || 1);
-    if (entry.blocked && sender.tab) {
-      browser.tabs.update(sender.tab.id, { url: INTERSTITIAL_URL });
-    }
-    return entry;
-  }
+// --- messages from content scripts -------------------------------------------
 
-  // Lets the content script's on-page badge show live numbers without
-  // any desktop console/debugger attached - the only way to see what's
-  // happening when testing purely on-device.
-  if (msg?.type === "feed-limiter:get-status") {
-    const site = msg.site;
-    const cfg = FEED_LIMITER_CONFIG.sites[site];
-    if (!cfg) return null;
-    const entry = await getEntry(site);
-    return { entry, cfg };
-  }
-
-  // Per-tab visibility reports (document.visibilitychange) from each
-  // adapter - see tabVisibility below for why this exists.
-  if (msg?.type === "feed-limiter:visibility") {
-    if (sender.tab) tabVisibility.set(sender.tab.id, !!msg.visible);
+async function handlePostsSeen(msg) {
+  await ready;
+  const cfg = FEED_LIMITER_CONFIG.sites[msg.site];
+  if (!cfg || cfg.type !== "built-in") {
+    console.error("[feed-limiter] posts-seen for a site without post counting", msg.site);
     return;
+  }
+  if (!Number.isInteger(msg.count) || msg.count < 1 || msg.count > MAX_POSTS_PER_MESSAGE) {
+    console.error("[feed-limiter] posts-seen with invalid count", msg.site, msg.count);
+    return;
+  }
+  if (!cfg.enabled) return;
+  await recordUsage(msg.site, (entry) => {
+    entry.postsSeen += msg.count;
+  });
+}
+
+async function handleVideoWatched(msg) {
+  await ready;
+  if (typeof msg.videoId !== "string" || !VIDEO_ID_RE.test(msg.videoId)) {
+    console.error("[feed-limiter] video-watched with invalid videoId", msg.videoId);
+    return;
+  }
+  const cfg = FEED_LIMITER_CONFIG.sites["youtube.com"];
+  if (!cfg || !cfg.enabled) return;
+  await recordUsage("youtube.com", (entry) => {
+    if (!entry.watchedVideoIds.includes(msg.videoId)) entry.watchedVideoIds.push(msg.videoId);
+  });
+}
+
+function handleVisibility(msg, sender) {
+  if (!sender.tab || typeof msg.visible !== "boolean") {
+    console.error("[feed-limiter] malformed visibility report", msg, sender.url);
+    return;
+  }
+  tabVisibility.set(sender.tab.id, msg.visible);
+}
+
+browser.runtime.onMessage.addListener((msg, sender) => {
+  if (!isPlainObject(msg) || typeof msg.type !== "string") {
+    console.error("[feed-limiter] malformed content-script message", msg);
+    return;
+  }
+  switch (msg.type) {
+    case "feed-limiter:posts-seen":
+      return handlePostsSeen(msg).catch((e) => console.error("[feed-limiter] posts-seen failed", msg.site, e));
+    case "feed-limiter:video-watched":
+      return handleVideoWatched(msg).catch((e) => console.error("[feed-limiter] video-watched failed", e));
+    case "feed-limiter:visibility":
+      handleVisibility(msg, sender);
+      return;
+    default:
+      console.error("[feed-limiter] unknown content-script message type", msg.type);
   }
 });
 
-// Removes a tab's stale visibility entry once it's gone, so a closed
-// tab's last-known state can never be mistaken for a live one.
 browser.tabs.onRemoved.addListener((tabId) => tabVisibility.delete(tabId));
 
-// --- hard block on return: catches reloads, new tabs, deep links ---
-browser.webNavigation.onBeforeNavigate.addListener(async (details) => {
-  if (details.frameId !== 0) return; // top-level frame only
-  let url;
-  try {
-    url = new URL(details.url);
-  } catch (e) {
-    return;
-  }
-  const site = matchSite(url.hostname, url.pathname);
-  if (!site) return;
-  if (await isBlocked(site)) {
-    browser.tabs.update(details.tabId, { url: INTERSTITIAL_URL });
-  }
-});
+// --- hard block on return ----------------------------------------------------
 
-// --- timer tracking: is a configured site genuinely on-screen right now? ---
-async function currentForegroundSite() {
-  const tabsFound = await browser.tabs.query({ active: true, currentWindow: true });
-  const activeTab = tabsFound[0];
-  if (!activeTab || !activeTab.url) return null;
-  const reportedVisible = tabVisibility.get(activeTab.id);
-  const visible = reportedVisible !== undefined ? reportedVisible : windowFocused;
-  if (!visible) return null;
-  try {
-    const url = new URL(activeTab.url);
-    return matchSite(url.hostname, url.pathname);
-  } catch (e) {
-    return null;
-  }
+async function blockIfCapped(details) {
+  if (details.frameId !== 0) return;
+  await ready;
+  const site = siteForUrl(details.url);
+  if (!site) return;
+  const cfg = FEED_LIMITER_CONFIG.sites[site];
+  if (!cfg || !cfg.enabled) return;
+  const key = `${site}:${todayKey()}`;
+  const counts = await readCounts();
+  if (isCapped(cfg, normalizeEntry(counts[key], key))) redirectTab(details.tabId);
 }
 
-// FIX (timer-stuck-at-zero bug): `browser.windows` is a UI-scoped API that
-// GeckoView does NOT implement on Android (confirmed - windows/tabs-UI
-// hooks are out of scope for GeckoView's WebExtension support, unlike
-// tabs/alarms/webRequest which were specifically patched in). The old,
-// unguarded `browser.windows.onFocusChanged.addListener(...)` call below
-// threw a synchronous TypeError ("Cannot read properties of undefined")
-// the instant this background script loaded on-device - and since that
-// statement sat ABOVE browser.alarms.create(...) in file order, the
-// uncaught exception aborted the rest of this top-level script before it
-// ever got there. Net effect: the alarm was never created, onAlarm was
-// never registered, tickTimer() was never called - the timer silently
-// never ran at all, while everything registered earlier in the file
-// (onMessage, onBeforeNavigate) kept working fine, which is exactly the
-// "posts count, timer doesn't" symptom reported on-device.
-// Fix: feature-detect before touching browser.windows, and fall back to
-// tabVisibility as the sole signal (it's the trusted one on Android
-// anyway per the comment above tabVisibility) - windowFocused just stays
-// true as a harmless default when browser.windows isn't there.
+function onNavigation(details) {
+  blockIfCapped(details).catch((e) => console.error("[feed-limiter] navigation check failed", details.url, e));
+}
+
+browser.webNavigation.onBeforeNavigate.addListener(onNavigation);
+// Single-page apps (YouTube moving between /watch and /shorts/) navigate via
+// pushState, which never fires onBeforeNavigate.
+browser.webNavigation.onHistoryStateUpdated.addListener(onNavigation);
+
+// --- timer -------------------------------------------------------------------
+
+async function currentForegroundSite() {
+  if (pictureInPicture) return null;
+  const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
+  if (!activeTab) return null;
+  const reported = tabVisibility.get(activeTab.id);
+  const visible = reported !== undefined ? reported : windowFocused;
+  return visible ? siteForUrl(activeTab.url) : null;
+}
+
+// Touching browser.windows unguarded throws on GeckoView and would abort the
+// rest of this script, including the alarm setup below.
 if (browser.windows && browser.windows.onFocusChanged) {
   browser.windows.onFocusChanged.addListener((windowId) => {
     windowFocused = windowId !== browser.windows.WINDOW_ID_NONE;
   });
-} else {
-  console.log(
-    "[feed-limiter] browser.windows unavailable (expected on GeckoView/Android) - " +
-      "relying on tabVisibility only, windowFocused stays true"
-  );
 }
 
-// 1-minute resolution via the alarms API rather than setInterval, so
-// tracking survives the background page being suspended/restarted.
-browser.alarms.create("feed-limiter-tick", { periodInMinutes: 1 });
-browser.alarms.onAlarm.addListener(async (alarm) => {
-  if (alarm.name !== "feed-limiter-tick") return;
+async function onTick() {
+  await ready;
+  if (blockedCacheDay !== todayKey()) await reevaluateAll();
   const site = await currentForegroundSite();
-  if (!site) return;
-  const cfg = FEED_LIMITER_CONFIG.sites[site];
-  if (cfg && cfg.timerMinutesLimit != null) {
-    await tickTimer(site);
-  }
+  const cfg = site && FEED_LIMITER_CONFIG.sites[site];
+  if (!cfg || !cfg.enabled) return;
+  await recordUsage(site, (entry) => {
+    entry.minutesUsed += 1;
+  });
+}
+
+// alarms rather than setInterval so ticking survives the background page
+// being suspended and restarted.
+browser.alarms.create(TICK_ALARM, { periodInMinutes: 1 });
+browser.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== TICK_ALARM) return;
+  onTick().catch((e) => console.error("[feed-limiter] timer tick failed", e));
 });
 
-// --- best-effort network-level cutoff (belt-and-braces for post cap) ---
-// CAVEAT - NOT YET VERIFIED AGAINST LIVE TRAFFIC for any site below,
-// Instagram/X included: these are starting guesses at each site's
-// pagination/"load more" endpoint based on publicly documented API shapes,
-// not confirmed against what each site actually calls today. All of these
-// sites change their API paths without notice. Before relying on this
-// layer for a given site, open devtools Network tab (filtered to
-// Fetch/XHR), scroll the real feed, and update that site's pattern(s) to
-// match what you actually see. Until then, treat the content-script DOM
-// cutoff as the real enforcement and this whole layer as a secondary one
-// that may currently be a no-op for some or all sites - TikTok and
-// LinkedIn in particular are guesses with lower confidence than the rest,
-// since their pagination calls are less consistently documented
-// publicly. YouTube Shorts has no pattern at all for the same reason
-// (Shorts prefetches via an internal batch endpoint that isn't stable
-// enough to guess) - its post cap relies on the DOM cutoff alone.
+// --- network cutoff (backup for the post cap) --------------------------------
+// Unverified guesses at each site's pagination endpoints; the DOM cutoff and
+// the interstitial redirect are the real enforcement. YouTube Shorts has none.
 const PAGINATION_URL_PATTERNS = [
   "*://*.instagram.com/graphql/query*",
   "*://*.instagram.com/api/v1/feed/timeline/*",
@@ -248,99 +314,259 @@ const PAGINATION_URL_PATTERNS = [
 
 browser.webRequest.onBeforeRequest.addListener(
   (details) => {
-    let url;
-    try {
-      url = new URL(details.url);
-    } catch (e) {
-      return {};
-    }
-    const site = matchSite(url.hostname, url.pathname);
-    if (!site) return {};
-    const cfg = FEED_LIMITER_CONFIG.sites[site];
-    if (!cfg || cfg.postLimit == null) return {};
-    // isBlocked() is async but this listener must respond synchronously
-    // for blocking webRequest - Phase 1 keeps a tiny in-memory mirror of
-    // the blocked flags, refreshed whenever registerPostsSeen/tickTimer
-    // flips one, so this check doesn't need to await storage.
-    if (blockedSitesCache.has(site)) {
-      return { cancel: true };
-    }
-    return {};
+    // Yesterday's blocks must not keep cancelling requests after midnight,
+    // even in the minute before the next tick rebuilds the cache.
+    if (blockedCacheDay !== todayKey()) return {};
+    const site = siteForUrl(details.url);
+    return site && blockedSitesCache.has(site) ? { cancel: true } : {};
   },
   { urls: PAGINATION_URL_PATTERNS },
   ["blocking"]
 );
 
-async function hydrateBlockedCache() {
-  for (const site of Object.keys(FEED_LIMITER_CONFIG.sites)) {
-    if (await isBlocked(site)) blockedSitesCache.add(site);
+// --- settings snapshots ------------------------------------------------------
+
+function isValidCustomDomain(key) {
+  return HOSTNAME_RE.test(key) &&
+    !isUnderDomain(key, "youtube.com") &&
+    !Object.keys(BUILT_IN_DOMAINS).some((domain) => isUnderDomain(key, domain));
+}
+
+function validateSite(key, raw) {
+  const reject = (reason) => {
+    console.error(`[feed-limiter] rejecting settings for ${key}: ${reason}`, raw);
+    return null;
+  };
+  if (!isPlainObject(raw)) return reject("not an object");
+  const expectedType = FIXED_SITE_TYPES[key] || "custom";
+  if (raw.type !== expectedType) return reject(`type must be ${expectedType}`);
+  if (expectedType === "custom" && !isValidCustomDomain(key)) return reject("not an allowed custom domain");
+  if (typeof raw.enabled !== "boolean") return reject("enabled must be a boolean");
+  if (!MODES.includes(raw.mode)) return reject("unknown mode");
+  if (expectedType !== "built-in" && raw.mode !== "timer") return reject("timer-only site with a non-timer mode");
+  if (expectedType === "built-in" ? !isLimit(raw.postLimit) : raw.postLimit !== null) return reject("bad postLimit");
+  if (raw.timerMinutesLimit !== null && !isLimit(raw.timerMinutesLimit)) return reject("bad timerMinutesLimit");
+  if (raw.mode !== "post" && raw.timerMinutesLimit === null) return reject("timer cap on without a limit");
+  if (expectedType === "youtube-regular") {
+    if (raw.videoLimit !== null && !isLimit(raw.videoLimit)) return reject("bad videoLimit");
+  } else if (raw.videoLimit !== undefined) {
+    return reject("videoLimit is only allowed on youtube.com");
+  }
+  if (typeof raw.desaturate !== "boolean") return reject("desaturate must be a boolean");
+
+  const cfg = {
+    type: raw.type,
+    enabled: raw.enabled,
+    mode: raw.mode,
+    postLimit: raw.postLimit,
+    timerMinutesLimit: raw.timerMinutesLimit,
+    desaturate: raw.desaturate
+  };
+  if (expectedType === "youtube-regular") cfg.videoLimit = raw.videoLimit;
+  return cfg;
+}
+
+// Native is the source of truth: sites absent from a valid snapshot are
+// removed. Anything malformed keeps its current settings instead, so a bad
+// message can never silently loosen enforcement.
+function parseSnapshot(raw, source) {
+  if (!isPlainObject(raw) || !isPlainObject(raw.settings)) {
+    console.error(`[feed-limiter] ignoring malformed settings snapshot from ${source}`, raw);
+    return null;
+  }
+  let lowSaturation = FEED_LIMITER_CONFIG.lowSaturation;
+  if (LOW_SATURATION_MODES.includes(raw.lowSaturation)) {
+    lowSaturation = raw.lowSaturation;
+  } else {
+    console.error(`[feed-limiter] invalid lowSaturation from ${source}; keeping "${lowSaturation}"`, raw.lowSaturation);
+  }
+
+  const current = FEED_LIMITER_CONFIG.sites;
+  const sites = {};
+  for (const [key, value] of Object.entries(raw.settings)) {
+    const cfg = validateSite(key, value);
+    if (cfg) sites[key] = cfg;
+    else if (current[key]) sites[key] = current[key];
+  }
+  for (const key of Object.keys(FIXED_SITE_TYPES)) {
+    if (sites[key]) continue;
+    console.error(`[feed-limiter] snapshot from ${source} is missing ${key}; keeping current settings`);
+    sites[key] = current[key];
+  }
+  return { sites, lowSaturation };
+}
+
+function applySnapshot(parsed) {
+  FEED_LIMITER_CONFIG.sites = parsed.sites;
+  FEED_LIMITER_CONFIG.lowSaturation = parsed.lowSaturation;
+}
+
+// Lets custom sites be enforced after a restart before native reconnects.
+async function loadPersistedSnapshot() {
+  const stored = await browser.storage.local.get(SNAPSHOT_STORAGE_KEY);
+  const raw = stored[SNAPSHOT_STORAGE_KEY];
+  if (raw === undefined) return;
+  const parsed = parseSnapshot(raw, "storage");
+  if (parsed) applySnapshot(parsed);
+}
+
+async function handleNativeSnapshot(msg) {
+  const parsed = parseSnapshot(msg, "native");
+  if (!parsed) return;
+  applySnapshot(parsed);
+  await reevaluateAll();
+  await applyLowSaturation();
+  try {
+    await browser.storage.local.set({
+      [SNAPSHOT_STORAGE_KEY]: { settings: parsed.sites, lowSaturation: parsed.lowSaturation }
+    });
+  } catch (e) {
+    console.error("[feed-limiter] could not persist settings; they apply now but may not survive a restart", e);
   }
 }
-hydrateBlockedCache();
 
-// --- native bridge (Phase 2 Settings UI sync) ---
-// FIX (settings-page-shows-no-counts bug): nothing in this file previously
-// connected to the native side at all, so FeedLimiterExtensionBridge.kt's
-// onConnect/onPortMessage never fired, _liveUsage stayed permanently
-// empty, and the native Settings screen had nothing to display. This
-// section establishes that connection, applies settings pushed down from
-// the native Settings screen onto the (previously hardcoded-only)
-// FEED_LIMITER_CONFIG, and reports live usage back up after every count
-// change.
-//
-// Requires "nativeMessaging" and "geckoViewAddons" permissions in
-// manifest.json (added alongside this fix) - without those,
-// browser.runtime.connectNative throws / is undefined, even for a
-// built-in extension. "feedlimiter" below MUST exactly match the
-// nativeApp string GeckoProvider.kt passes to
-// webExtension.setMessageDelegate(feedLimiterBridge, "feedlimiter").
-let nativePort = null;
+// --- low saturation ----------------------------------------------------------
+// A fixed overlay with backdrop-filter instead of `filter` on <html>, because
+// a filter on an ancestor breaks position:fixed on many sites. User origin +
+// !important so page styles can't override it. Registered CSS is injected
+// before first paint, so there's no flash of full colour.
+const LOW_SATURATION_CSS = `html::after {
+  content: "" !important;
+  display: block !important;
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 2147483647 !important;
+  pointer-events: none !important;
+  background: none !important;
+  opacity: 1 !important;
+  transform: none !important;
+  visibility: visible !important;
+  backdrop-filter: saturate(0.1) !important;
+}`;
+
+function matchPatternsFor(key) {
+  if (key === "youtube.com/shorts") return ["*://*.youtube.com/shorts/*"];
+  const aliases = Object.keys(BUILT_IN_DOMAINS).filter((domain) => BUILT_IN_DOMAINS[domain] === key);
+  return (aliases.length ? aliases : [key]).map((domain) => `*://*.${domain}/*`);
+}
+
+function lowSaturationTargets() {
+  const mode = FEED_LIMITER_CONFIG.lowSaturation;
+  if (mode === "all") return { matches: ["<all_urls>"], excludeMatches: [] };
+  if (mode !== "selected") return null;
+  const selected = Object.keys(FEED_LIMITER_CONFIG.sites).filter((key) => FEED_LIMITER_CONFIG.sites[key].desaturate);
+  if (!selected.length) return null;
+  const excludeMatches = selected.includes("youtube.com") && !selected.includes("youtube.com/shorts")
+    ? ["*://*.youtube.com/shorts/*"]
+    : [];
+  return { matches: selected.flatMap(matchPatternsFor), excludeMatches };
+}
+
+async function updateLowSaturationRegistration() {
+  const targets = lowSaturationTargets();
+  const signature = JSON.stringify(targets);
+  if (signature === saturationSignature) return;
+  if (saturationRegistration) {
+    await saturationRegistration.unregister();
+    saturationRegistration = null;
+  }
+  saturationSignature = JSON.stringify(null);
+  if (!targets) return;
+  const options = {
+    matches: targets.matches,
+    css: [{ code: LOW_SATURATION_CSS }],
+    cssOrigin: "user",
+    runAt: "document_start",
+    allFrames: false
+  };
+  if (targets.excludeMatches.length) options.excludeMatches = targets.excludeMatches;
+  saturationRegistration = await browser.contentScripts.register(options);
+  saturationSignature = signature;
+}
+
+function applyLowSaturation() {
+  saturationQueue = saturationQueue
+    .then(updateLowSaturationRegistration)
+    .catch((e) => console.error("[feed-limiter] low-saturation update failed", e));
+  return saturationQueue;
+}
+
+// --- native bridge -----------------------------------------------------------
+// "feedlimiter" must match the nativeApp name GeckoProvider.kt passes to
+// setMessageDelegate().
+
+function postToNative(message) {
+  if (!nativePort) return;
+  try {
+    nativePort.postMessage(message);
+  } catch (e) {
+    console.error("[feed-limiter] failed to post to native", message.type, e);
+  }
+}
+
+function sendCountsUpdate(site, entry) {
+  postToNative({
+    type: "feed-limiter:counts-update",
+    site,
+    entry: {
+      postsSeen: entry.postsSeen,
+      minutesUsed: entry.minutesUsed,
+      blocked: entry.blocked,
+      videosWatched: entry.watchedVideoIds.length
+    }
+  });
+}
+
+function handleNativeMessage(msg) {
+  if (!isPlainObject(msg) || typeof msg.type !== "string") {
+    console.error("[feed-limiter] malformed native message", msg);
+    return;
+  }
+  switch (msg.type) {
+    case "feed-limiter:settings-snapshot":
+      handleNativeSnapshot(msg).catch((e) => console.error("[feed-limiter] failed to apply native settings", e));
+      return;
+    case "feed-limiter:pip":
+      if (typeof msg.active !== "boolean") {
+        console.error("[feed-limiter] malformed pip message", msg);
+        return;
+      }
+      pictureInPicture = msg.active;
+      return;
+    default:
+      console.error("[feed-limiter] unknown native message type", msg.type);
+  }
+}
 
 function connectNative() {
   try {
     nativePort = browser.runtime.connectNative("feedlimiter");
   } catch (e) {
-    console.error("[feed-limiter] connectNative failed", e);
+    console.error("[feed-limiter] connectNative failed; settings stay as last persisted", e);
     return;
   }
-
-  nativePort.onMessage.addListener((msg) => {
-    if (msg?.type === "feed-limiter:settings-snapshot") {
-      applySettingsSnapshot(msg.settings);
-    }
-  });
-
-  nativePort.onDisconnect.addListener(() => {
-    console.log("[feed-limiter] native port disconnected - retrying in 5s");
+  nativePort.onMessage.addListener(handleNativeMessage);
+  nativePort.onDisconnect.addListener((port) => {
+    console.error("[feed-limiter] native port disconnected; retrying in 5s", port.error);
     nativePort = null;
     setTimeout(connectNative, 5000);
   });
-
-  // Ask native for whatever it already has as soon as the port is up,
-  // rather than waiting for the user to touch something in Settings.
-  nativePort.postMessage({ type: "feed-limiter:request-settings" });
+  postToNative({ type: "feed-limiter:request-settings" });
 }
 
-// Merges native-pushed per-site overrides (e.g. a new postLimit/
-// timerMinutesLimit the user set in the Settings screen) onto the
-// hardcoded defaults in config.js, so Phase 2's Settings UI actually
-// takes effect here instead of being silently ignored.
-function applySettingsSnapshot(settings) {
-  if (!settings) return;
-  for (const [site, override] of Object.entries(settings)) {
-    if (!FEED_LIMITER_CONFIG.sites[site]) continue;
-    Object.assign(FEED_LIMITER_CONFIG.sites[site], override);
-  }
-  console.log("[feed-limiter] applied native settings snapshot", settings);
-}
-
-function sendCountsUpdate(site, entry) {
-  if (!nativePort) return;
+async function start() {
   try {
-    nativePort.postMessage({ type: "feed-limiter:counts-update", site, entry });
+    await loadPersistedSnapshot();
   } catch (e) {
-    console.error("[feed-limiter] failed to send counts-update", e);
+    console.error("[feed-limiter] could not load persisted settings; using defaults until native connects", e);
   }
+  try {
+    await reevaluateAll();
+  } catch (e) {
+    console.error("[feed-limiter] startup re-evaluation failed", e);
+  }
+  await applyLowSaturation();
+  connectNative();
 }
 
-connectNative();
+ready = start();
