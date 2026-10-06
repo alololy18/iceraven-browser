@@ -37,14 +37,66 @@ jobs:
       - name: Set up Python venv
         run: ./automation/iceraven/setup_venv.sh
 
-      - name: Configure debug signing
-        run: echo "autosignReleaseWithDebugKey=" >> local.properties
+      # Fails before the long build if the signing secrets aren't set up.
+      - name: Check signing secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.FEED_LIMITER_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.FEED_LIMITER_KEYSTORE_PASSWORD }}
+        run: |
+          missing=0
+          [ -n "$KEYSTORE_BASE64" ] || { echo "::error::Repository secret FEED_LIMITER_KEYSTORE_BASE64 is not set"; missing=1; }
+          [ -n "$KEYSTORE_PASSWORD" ] || { echo "::error::Repository secret FEED_LIMITER_KEYSTORE_PASSWORD is not set"; missing=1; }
+          exit $missing
 
       - name: Build APK
         run: ./gradlew app:assembleForkRelease -PversionName="feed-limiter-0.1" --stacktrace --no-daemon
+
+      # app/build.gradle gives forkRelease no signingConfig, so Gradle outputs
+      # unsigned APKs. Signing every build with the same key from Secrets is
+      # what lets a new APK install over the previous one and keep its data.
+      - name: Sign APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.FEED_LIMITER_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.FEED_LIMITER_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          APK_DIR=gradle/build/app/outputs/apk/forkRelease
+          UNSIGNED="$APK_DIR/app-arm64-v8a-forkRelease-unsigned.apk"
+          if [ ! -f "$UNSIGNED" ]; then
+            echo "::error::Expected $UNSIGNED but it wasn't built"
+            ls -alh "$APK_DIR"
+            exit 1
+          fi
+
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          BUILD_TOOLS=$(ls -d "$SDK_ROOT"/build-tools/*/ 2>/dev/null | sort -V | tail -n1 || true)
+          if [ -z "$BUILD_TOOLS" ] || [ ! -x "${BUILD_TOOLS}apksigner" ]; then
+            echo "::error::No Android build-tools with apksigner found under '$SDK_ROOT'"
+            exit 1
+          fi
+
+          KEYSTORE="$RUNNER_TEMP/feed-limiter.p12"
+          if ! printf '%s' "$KEYSTORE_BASE64" | tr -d '\r\n ' | base64 --decode > "$KEYSTORE"; then
+            echo "::error::FEED_LIMITER_KEYSTORE_BASE64 is not valid base64"
+            exit 1
+          fi
+
+          mkdir -p signed
+          "${BUILD_TOOLS}zipalign" -p -f 4 "$UNSIGNED" "$RUNNER_TEMP/aligned.apk"
+          "${BUILD_TOOLS}apksigner" sign \
+            --ks "$KEYSTORE" \
+            --ks-pass env:KEYSTORE_PASSWORD \
+            --key-pass env:KEYSTORE_PASSWORD \
+            --ks-key-alias feedlimiter \
+            --out signed/feed-limiter-arm64-v8a.apk \
+            "$RUNNER_TEMP/aligned.apk"
+          rm -f "$KEYSTORE"
+          # Printed so each run's log shows which certificate signed it.
+          "${BUILD_TOOLS}apksigner" verify --print-certs signed/feed-limiter-arm64-v8a.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: feed-limiter-apk
-          path: gradle/build/app/outputs/apk/forkRelease/*.apk
+          path: signed/feed-limiter-arm64-v8a.apk
+          if-no-files-found: error
