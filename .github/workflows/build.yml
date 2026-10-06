@@ -48,6 +48,14 @@ jobs:
           [ -n "$KEYSTORE_PASSWORD" ] || { echo "::error::Repository secret FEED_LIMITER_KEYSTORE_PASSWORD is not set"; missing=1; }
           exit $missing
 
+      - name: Restore fixed signing key
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$DEBUG_KEYSTORE_BASE64" ]; then echo "::error::DEBUG_KEYSTORE_BASE64 secret is missing"; exit 1; fi
+          mkdir -p ~/.android
+          echo "$DEBUG_KEYSTORE_BASE64" | base64 -d > ~/.android/debug.keystore
+      
       - name: Build APK
         run: ./gradlew app:assembleForkRelease -PversionName="feed-limiter-0.1" --stacktrace --no-daemon
 
